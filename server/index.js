@@ -72,7 +72,12 @@ app.get("/api/health", (req, res) => {
 
 // 빌드된 정적 프론트엔드 서빙
 const distPath = path.join(__dirname, "..", "dist");
-app.use(express.static(distPath));
+// dotfiles: "allow"가 필요한 이유 — Express의 기본 정적 서빙은 .well-known처럼
+// 점(.)으로 시작하는 폴더/파일을 무시하고 건너뛴다. 그런데 구글 플레이의
+// Digital Asset Links 검증(TWA)은 정확히 /.well-known/assetlinks.json 경로를
+// 요구하므로, 이 옵션 없이는 그 요청이 실제 파일 대신 아래 catch-all로 빠져서
+// index.html(HTML)이 잘못 반환된다.
+app.use(express.static(distPath, { dotfiles: "allow" }));
 // SPA 라우팅 대응 catch-all — Express 5의 path-to-regexp가 "*" 패턴을 더 이상
 // 허용하지 않으므로, 라우트 패턴 대신 마지막 순서의 일반 미들웨어로 처리한다.
 app.use((req, res) => {
