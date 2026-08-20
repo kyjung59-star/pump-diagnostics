@@ -35,3 +35,13 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <App />
   </React.StrictMode>
 );
+
+// PWA 설치 가능성(installability) 요건 중 하나가 서비스 워커 등록이다.
+// (배포 시 HTTPS가 필요 — Render/Vercel/Netlify 등은 기본 HTTPS라 문제없음)
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch((err) => {
+      console.error("서비스 워커 등록 실패:", err);
+    });
+  });
+}

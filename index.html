@@ -2,8 +2,26 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Pump Diagnostics</title>
+
+    <!-- PWA 매니페스트 -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#14171A" />
+    <meta name="description" content="산업용 원심펌프 트러블슈팅 진단 챗봇 — 증상 기반 원인 진단과 조치 가이드" />
+
+    <!-- 아이콘 -->
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- iOS에서 PWA를 "standalone" 앱처럼 보이게 하는 태그들 -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Pump Diagnostics" />
+
+    <!-- 안드로이드 크롬 -->
+    <meta name="mobile-web-app-capable" content="yes" />
+
     <style>
       html, body { margin: 0; padding: 0; background: #0b0d0f; }
       #root { min-height: 100vh; padding: 24px 12px; box-sizing: border-box; }
