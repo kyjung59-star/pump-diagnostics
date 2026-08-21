@@ -3,9 +3,9 @@
     "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
-      "package_name": "PWABuilder에서_생성된_패키지명_여기에_입력_예:_com.pumpdiagnostics.app",
+      "package_name": "com.onrender.pump_diagnostics.twa",
       "sha256_cert_fingerprints": [
-        "PWABuilder_빌드_결과에서_나오는_SHA256_지문_여기에_입력"
+        "9A:BF:39:01:BA:81:6B:30:CE:75:F0:2C:01:BB:C4:64:AF:68:80:FB:48:7A:8B:D7:DD:19:24:3F:DC:5E:BD:2C"
       ]
     }
   }
