@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { AlertTriangle, Send, RotateCcw, Undo2, Activity, Wrench, ShieldAlert, ChevronRight, History as HistoryIcon, X, Trash2, Globe, Droplets } from "lucide-react";
+import { evaluateVibration, describeVibration, vibrationAnswerLabel } from "./thresholds.js";
 import { computeNpsh, computeNpshFromText, describeNpsh, npshAnswerLabel, DEFAULT_TEMP_C, DEFAULT_FRICTION_LOSS_M } from "./npsh.js";
 
 /* =====================================================================
@@ -56,9 +57,13 @@ const CAUSE_LABEL = {
   BEARING_WEAR: { ko: "베어링 마모", en: "Bearing wear" },
   MISALIGNMENT: { ko: "축 정렬 불량", en: "Shaft misalignment" },
   PART_RUBBING: { ko: "부품 간 접촉·마찰 (임펠러·웨어링 등)", en: "Part rubbing / contact (impeller, wear rings, etc.)" },
-  FLUID_PULSATION: { ko: "유체 맥동·배관 공진", en: "Fluid pulsation / piping resonance" },
+  FLUID_PULSATION: { ko: "유체 맥동·내부 재순환 (MCSF 미달 포함)", en: "Fluid pulsation / internal recirculation (incl. below MCSF)" },
+  DRY_RUNNING: { ko: "무유체 운전 (드라이 러닝)", en: "Dry running" },
+  PIPE_STRAIN: { ko: "배관 응력 (Pipe Strain)", en: "Pipe strain" },
+  REVERSE_ROTATION: { ko: "모터 역회전", en: "Reverse rotation" },
+  WEAR_RING_WEAR: { ko: "웨어링 간극 과다 마모", en: "Excessive wear-ring clearance" },
   IMPELLER_UNBALANCE: { ko: "임펠러 언밸런스", en: "Impeller unbalance" },
-  WEAK_FOUNDATION: { ko: "기초·베이스 불량", en: "Weak or defective foundation" },
+  WEAK_FOUNDATION: { ko: "기초·베이스 불량 / 소프트풋", en: "Weak foundation / soft foot" },
   AIR_ENTRAINMENT: { ko: "공기 유입", en: "Air entrainment" },
   IMPELLER_WEAR_OR_CLOG: { ko: "임펠러 마모/막힘", en: "Impeller wear or clogging" },
   VALVE_MISCONFIGURED: { ko: "밸브 설정 이상", en: "Valve misconfiguration" },
@@ -84,6 +89,11 @@ const CHECKLISTS = {
       ["pulsating_beat", { ko: "맥동음 (쿵쿵/웅웅하며 커졌다 작아졌다 반복)", en: "Pulsation noise (throbbing, rising and falling repeatedly)" }],
       ["periodic_knocking", { ko: "주기적 덜컹거림", en: "Periodic knocking" }],
       ["low_humming", { ko: "웅웅거리는 저음", en: "Low humming" }],
+    ] },
+    { key: "noise_persists_after_adjust", text: { ko: "흡입 밸브 전개·수위 확보·유체 온도 하향 등을 해도 자갈 구르는 소리가 계속되나요?", en: "Does the gravel-like sound continue even after fully opening the suction valve, raising the level, or lowering fluid temperature?" }, options: [
+      ["yes", { ko: "예, 계속됨", en: "Yes, it continues" }],
+      ["no", { ko: "아니오, 줄거나 사라짐", en: "No, it fades or stops" }],
+      ["not_tried", { ko: "아직 조치해보지 않음", en: "Not tried yet" }],
     ] },
     { key: "noise_location", text: { ko: "소음이 주로 어디서 발생하나요?", en: "Where does the noise mainly occur?" }, options: [
       ["suction_side", { ko: "흡입측", en: "Suction side" }],
@@ -124,8 +134,12 @@ const CHECKLISTS = {
     ] },
     // 숫자 입력형 질문 — 증상 설명에 NPSHr/흡입높이가 이미 있으면 자동 계산되어 이 질문은 건너뛴다.
     { key: "npsh_margin", type: "npsh", text: { ko: "NPSH(유효흡입수두) 여유를 확인해볼까요? 펌프 사양서의 NPSHr와 흡입 조건을 알고 계시면 입력해주세요.", en: "Shall we check the NPSH margin? If you know the pump's NPSHr and the suction conditions, enter them below." }, options: [] },
+    { key: "low_flow_operation", text: { ko: "토출 밸브를 많이 조여 최소 연속 안전 유량(MCSF) 미만으로 운전했나요?", en: "Has it been run below the minimum continuous safe flow (MCSF) with the discharge valve throttled far down?" }, options: [
+      ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
+    ] },
   ],
   VIBRATION: [
+    { key: "vibration_measure", type: "vib_measure", text: { ko: "진동 속도를 측정하셨다면 입력해주세요. (ISO 10816-3 기준으로 판정합니다)", en: "If you measured vibration velocity, enter it. (Judged against ISO 10816-3)" }, options: [] },
     { key: "vibration_location", text: { ko: "진동이 가장 크게 느껴지는 부위는 어디인가요?", en: "Where is the vibration felt most strongly?" }, options: [
       ["motor", { ko: "모터", en: "Motor" }],
       ["coupling", { ko: "커플링", en: "Coupling" }],
@@ -164,7 +178,7 @@ const CHECKLISTS = {
       ["not_measured", { ko: "측정 안 함 / 모름", en: "Not measured / unknown" }],
     ] },
     { key: "foundation_condition", text: { ko: "기초·베이스플레이트·앵커볼트 상태는 어떤가요?", en: "What is the condition of the foundation, baseplate and anchor bolts?" }, options: [
-      ["defective", { ko: "풀림·균열·그라우트 불량·약함", en: "Loose, cracked, poor grout, or weak" }],
+      ["defective", { ko: "풀림·균열·그라우트 불량·소프트풋(발 뜸)·약함", en: "Loose, cracked, poor grout, soft foot, or weak" }],
       ["normal", { ko: "이상 없음", en: "No problem found" }],
       ["not_checked", { ko: "확인 안 함", en: "Not checked" }],
     ] },
@@ -179,6 +193,17 @@ const CHECKLISTS = {
     { key: "lubrication_check", text: { ko: "윤활유/그리스 점검·교체 이력은 어떤가요?", en: "What's the lubricant/grease inspection or replacement history?" }, options: [
       ["recent", { ko: "최근 점검함", en: "Checked recently" }],
       ["overdue", { ko: "오래됨/미실시", en: "Overdue / not done" }],
+    ] },
+    { key: "pipe_strain_signs", text: { ko: "배관 연결 플랜지를 풀면 정렬값이 변하거나, 배관 지지가 부실해 배관이 펌프를 당기는(배관 응력) 징후가 있나요?", en: "Any sign of pipe strain? (alignment shifts when flanges are loosened, or weak supports let the piping pull on the pump)" }, options: [
+      ["yes", { ko: "예 (징후 있음)", en: "Yes (signs present)" }],
+      ["no", { ko: "아니오", en: "No" }],
+      ["not_checked", { ko: "확인 안 함", en: "Not checked" }],
+    ] },
+    { key: "oil_condition", text: { ko: "베어링 윤활유(또는 그리스) 상태는 어떤가요?", en: "What is the condition of the bearing oil (or grease)?" }, options: [
+      ["normal", { ko: "정상 (맑고 변색 없음)", en: "Normal (clear, no discoloration)" }],
+      ["emulsified", { ko: "우윳빛 유화 또는 거품이 심함", en: "Milky emulsion or heavy foaming" }],
+      ["contaminated", { ko: "변색·금속 가루·이물 혼입", en: "Discolored, metal particles or debris" }],
+      ["not_checked", { ko: "확인 안 함", en: "Not checked" }],
     ] },
   ],
   FLOW_LOW: [
@@ -204,6 +229,11 @@ const CHECKLISTS = {
     ] },
     { key: "operating_point_changed", text: { ko: "최근 운전점(유량/양정)이 설계값 대비 변경되었나요?", en: "Has the operating point (flow/head) recently shifted from the design value?" }, options: [
       ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
+    ] },
+    { key: "rotation_direction", text: { ko: "모터 회전 방향이 펌프 회전 방향 화살표와 일치하나요?", en: "Does the motor rotation match the pump's rotation arrow?" }, options: [
+      ["correct", { ko: "일치함", en: "Matches" }],
+      ["reversed", { ko: "반대로 돎 (역회전)", en: "Reversed" }],
+      ["not_checked", { ko: "확인 안 함", en: "Not checked" }],
     ] },
   ],
   PRESSURE_ABNORMAL: [
@@ -231,6 +261,7 @@ const CHECKLISTS = {
     { key: "leak_amount", text: { ko: "누설량은 미세한가요, 다량인가요?", en: "Is the leak minor or significant?" }, options: [
       ["minor_seeping", { ko: "미세하게 스며듦", en: "Minor seeping" }],
       ["significant", { ko: "다량", en: "Significant" }],
+      ["spray_stream", { ko: "분사형/끊김 없이 흘러나옴", en: "Spraying / steady stream" }],
     ] },
     { key: "seal_service_time", text: { ko: "씰 교체/정비 이력 및 사용 시간은 어떤가요?", en: "What's the seal's replacement history and time in service?" }, options: [
       ["recent", { ko: "최근 교체함", en: "Replaced recently" }],
@@ -240,6 +271,19 @@ const CHECKLISTS = {
       ["coupling", { ko: "커플링", en: "Coupling" }],
       ["bearing_housing", { ko: "베어링 하우징", en: "Bearing housing" }],
       ["none", { ko: "없음", en: "None" }],
+    ] },
+    { key: "seal_flush_status", text: { ko: "씰 플러싱(밀봉 유체) 공급은 정상인가요?", en: "Is the seal flush supply normal?" }, options: [
+      ["normal", { ko: "정상 공급", en: "Normal" }],
+      ["lost_or_low", { ko: "끊겼거나 압력 부족/오염", en: "Lost, low pressure, or contaminated" }],
+      ["not_applicable", { ko: "플러싱 없음/해당없음", en: "No flush / not applicable" }],
+    ] },
+    { key: "dry_running_check", text: { ko: "흡입 탱크가 비었거나 흡입 밸브가 닫힌 채, 또는 프라이밍이 유실된 상태로 운전된 적이 있나요? (무유체 운전)", en: "Has it run with an empty suction tank, a closed suction valve, or lost prime? (dry running)" }, options: [
+      ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
+    ] },
+    { key: "pipe_strain_signs", text: { ko: "배관 연결 플랜지를 풀면 정렬값이 변하거나, 배관 지지가 부실해 배관이 펌프를 당기는(배관 응력) 징후가 있나요?", en: "Any sign of pipe strain? (alignment shifts when flanges are loosened, or weak supports let the piping pull on the pump)" }, options: [
+      ["yes", { ko: "예 (징후 있음)", en: "Yes (signs present)" }],
+      ["no", { ko: "아니오", en: "No" }],
+      ["not_checked", { ko: "확인 안 함", en: "Not checked" }],
     ] },
   ],
   OVERHEATING: [
@@ -257,6 +301,23 @@ const CHECKLISTS = {
     ] },
     { key: "deadhead_history", text: { ko: "토출측 밸브가 잠긴 채 장시간 운전(Dead-head)된 적이 있나요?", en: "Has it run for a long time with the discharge valve closed (dead-head)?" }, options: [
       ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
+    ] },
+    { key: "dry_running_check", text: { ko: "흡입 탱크가 비었거나 흡입 밸브가 닫힌 채, 또는 프라이밍이 유실된 상태로 운전된 적이 있나요? (무유체 운전)", en: "Has it run with an empty suction tank, a closed suction valve, or lost prime? (dry running)" }, options: [
+      ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
+    ] },
+    { key: "low_flow_operation", text: { ko: "토출 밸브를 많이 조여 최소 연속 안전 유량(MCSF) 미만으로 운전했나요?", en: "Has it been run below the minimum continuous safe flow (MCSF) with the discharge valve throttled far down?" }, options: [
+      ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
+    ] },
+    { key: "pipe_strain_signs", text: { ko: "배관 연결 플랜지를 풀면 정렬값이 변하거나, 배관 지지가 부실해 배관이 펌프를 당기는(배관 응력) 징후가 있나요?", en: "Any sign of pipe strain? (alignment shifts when flanges are loosened, or weak supports let the piping pull on the pump)" }, options: [
+      ["yes", { ko: "예 (징후 있음)", en: "Yes (signs present)" }],
+      ["no", { ko: "아니오", en: "No" }],
+      ["not_checked", { ko: "확인 안 함", en: "Not checked" }],
+    ] },
+    { key: "oil_condition", text: { ko: "베어링 윤활유(또는 그리스) 상태는 어떤가요?", en: "What is the condition of the bearing oil (or grease)?" }, options: [
+      ["normal", { ko: "정상 (맑고 변색 없음)", en: "Normal (clear, no discoloration)" }],
+      ["emulsified", { ko: "우윳빛 유화 또는 거품이 심함", en: "Milky emulsion or heavy foaming" }],
+      ["contaminated", { ko: "변색·금속 가루·이물 혼입", en: "Discolored, metal particles or debris" }],
+      ["not_checked", { ko: "확인 안 함", en: "Not checked" }],
     ] },
   ],
   MOTOR_ELECTRICAL: [
@@ -276,6 +337,14 @@ const CHECKLISTS = {
     { key: "recent_load_change", text: { ko: "최근 부하 변동(공정 조건 변경)이 있었나요?", en: "Any recent load change (process condition change)?" }, options: [
       ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
     ] },
+    { key: "motor_current_over", text: { ko: "운전 전류가 전부하 전류(FLA)의 105%를 넘나요?", en: "Does the running current exceed 105% of full-load amps (FLA)?" }, options: [
+      ["yes", { ko: "예 (105% 초과)", en: "Yes (above 105%)" }],
+      ["no", { ko: "아니오", en: "No" }],
+      ["not_checked", { ko: "측정 안 함", en: "Not measured" }],
+    ] },
+    { key: "fluid_property_exceeds", text: { ko: "이송 유체의 비중(SG) 또는 점도가 설계값보다 높은가요?", en: "Is the fluid's specific gravity or viscosity higher than the design value?" }, options: [
+      ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
+    ] },
   ],
   START_FAILURE: [
     { key: "start_failure_type", text: { ko: "기동 즉시 정지인가요, 아예 기동이 안 되나요?", en: "Does it trip immediately after starting, or fail to start at all?" }, options: [
@@ -292,17 +361,25 @@ const CHECKLISTS = {
     { key: "recent_wiring_work", text: { ko: "최근 배선/제어반 작업 이력이 있나요?", en: "Any recent wiring or control panel work?" }, options: [
       ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
     ] },
+    { key: "rotation_direction", text: { ko: "모터 회전 방향이 펌프 회전 방향 화살표와 일치하나요?", en: "Does the motor rotation match the pump's rotation arrow?" }, options: [
+      ["correct", { ko: "일치함", en: "Matches" }],
+      ["reversed", { ko: "반대로 돎 (역회전)", en: "Reversed" }],
+      ["not_checked", { ko: "확인 안 함", en: "Not checked" }],
+    ] },
+    { key: "dry_running_check", text: { ko: "흡입 탱크가 비었거나 흡입 밸브가 닫힌 채, 또는 프라이밍이 유실된 상태로 운전된 적이 있나요? (무유체 운전)", en: "Has it run with an empty suction tank, a closed suction valve, or lost prime? (dry running)" }, options: [
+      ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
+    ] },
   ],
 };
 
 const MATRIX = {
-  CAVITATION: { category: "NOISE", base: 30, rules: [["noise_type", "gravel_sound", 40], ["noise_type", "metallic_friction", -10], ["noise_vibration_together", "both", 15], ["vibration_frequency", "broadband", 10], ["vibration_direction", "no_dominant", 5], ["flow_change", "yes", 12], ["pressure_change", "yes", 8], ["suction_gauge_abnormal", "yes", 25], ["operating_point_changed", "yes", 15], ["recent_maintenance", "yes_part_replaced", -5]],
+  CAVITATION: { category: "NOISE", base: 30, rules: [["noise_type", "gravel_sound", 40], ["noise_type", "metallic_friction", -10], ["noise_vibration_together", "both", 15], ["vibration_frequency", "broadband", 10], ["vibration_direction", "no_dominant", 5], ["flow_change", "yes", 12], ["pressure_change", "yes", 8], ["suction_gauge_abnormal", "yes", 25], ["operating_point_changed", "yes", 15], ["recent_maintenance", "yes_part_replaced", -5], ["noise_persists_after_adjust", "yes", 30]],
     // 캐비테이션의 전형: 유량 변화 + 압력(흡입압력 포함) 변화가 있고, 소음과 진동이 함께 나타남 (조합 가점)
     combos: [[{ flow_change: "yes", noise_vibration_together: "both", $any: [{ pressure_change: "yes" }, { suction_gauge_abnormal: "yes" }] }, 50]] },
   PART_RUBBING: { category: "NOISE", base: 15, rules: [["noise_type", "metallic_friction", 35], ["noise_type", "periodic_knocking", 15], ["recent_maintenance", "yes_part_replaced", 20], ["noise_vibration_together", "noise_only", 10], ["overheating_bearing", "no", 5]] },
-  FLUID_PULSATION: { category: "NOISE", base: 15, rules: [["noise_type", "pulsating_beat", 40], ["noise_location", "discharge_side", 15], ["operating_point_changed", "yes", 20], ["pressure_change", "yes", 15], ["flow_change", "yes", 10]] },
-  BEARING_WEAR: { category: "VIBRATION", base: 25, rules: [["noise_type", "metallic_friction", 35], ["noise_type", "periodic_knocking", 30], ["vibration_location", "bearing_housing", 30], ["bearing_vib_direction", "all_directions", 25], ["bearing_vib_direction", "axial", 10], ["vibration_extent", "local", 10], ["vibration_frequency", "high_freq", 25], ["overheating_bearing", "yes", 25], ["lubrication_check", "overdue", 20], ["recent_maintenance", "no_long_term", 10]] },
-  MISALIGNMENT: { category: "VIBRATION", base: 20, rules: [["vibration_location", "coupling", 30], ["vibration_direction", "axial", 30], ["vibration_frequency", "2x", 30], ["noise_vibration_together", "vibration_only", 10], ["recent_maintenance", "yes_part_replaced", 15]] },
+  FLUID_PULSATION: { category: "NOISE", base: 15, rules: [["noise_type", "pulsating_beat", 40], ["noise_location", "discharge_side", 15], ["operating_point_changed", "yes", 20], ["pressure_change", "yes", 15], ["flow_change", "yes", 10], ["low_flow_operation", "yes", 30]] },
+  BEARING_WEAR: { category: "VIBRATION", base: 25, rules: [["noise_type", "metallic_friction", 35], ["noise_type", "periodic_knocking", 30], ["vibration_location", "bearing_housing", 30], ["bearing_vib_direction", "all_directions", 25], ["bearing_vib_direction", "axial", 10], ["vibration_extent", "local", 10], ["vibration_frequency", "high_freq", 25], ["overheating_bearing", "yes", 25], ["lubrication_check", "overdue", 20], ["recent_maintenance", "no_long_term", 10], ["oil_condition", "contaminated", 30]] },
+  MISALIGNMENT: { category: "VIBRATION", base: 20, rules: [["vibration_location", "coupling", 30], ["vibration_direction", "axial", 30], ["vibration_frequency", "2x", 30], ["noise_vibration_together", "vibration_only", 10], ["recent_maintenance", "yes_part_replaced", 15], ["pipe_strain_signs", "yes", 15]] },
   IMPELLER_UNBALANCE: { category: "VIBRATION", base: 15, rules: [["vibration_direction", "radial_horizontal", 25], ["vibration_direction", "radial_vertical", 20], ["bearing_vib_direction", "radial", 15], ["vibration_frequency", "1x", 35], ["noise_vibration_together", "vibration_only", 15], ["vibration_location", "motor", 5], ["recent_maintenance", "yes_part_replaced", 10]] },
   WEAK_FOUNDATION: { category: "VIBRATION", base: 15, rules: [["foundation_condition", "defective", 45], ["vibration_extent", "whole_equipment", 30], ["vibration_extent", "piping", 20], ["vibration_location", "foundation", 30], ["vibration_direction", "radial_vertical", 15], ["noise_vibration_together", "vibration_only", 10]] },
   AIR_ENTRAINMENT: { category: "NOISE", base: 15, rules: [["noise_location", "suction_side", 20], ["suction_gauge_abnormal", "yes", 20], ["flow_change", "yes", 8], ["pressure_change", "yes", 7], ["suction_level_dropped", "yes", 20]] },
@@ -311,11 +388,15 @@ const MATRIX = {
   SYSTEM_RESISTANCE_CHANGE: { category: "FLOW_LOW", base: 15, rules: [["parallel_pump_status", "other_pump_abnormal", 25], ["flow_decline_pattern", "gradual", 15], ["operating_point_changed", "yes", 20]] },
   IMPELLER_DAMAGE: { category: "PRESSURE_ABNORMAL", base: 15, rules: [["pressure_pattern", "steady_decline", 25], ["impeller_history", "wear_or_damage_known", 40], ["flow_decline_pattern", "gradual", 15]] },
   PIPING_LEAK_OR_AIR_INGRESS: { category: "PRESSURE_ABNORMAL", base: 15, rules: [["pressure_pattern", "pulsating", 30], ["piping_leak_signs", "yes", 35], ["discharge_valve_opening", "normal", 10]] },
-  MECHANICAL_SEAL_WEAR: { category: "LEAKAGE", base: 20, rules: [["leak_location", "shaft_seal", 40], ["seal_service_time", "long_overdue", 30], ["leak_amount", "minor_seeping", 10]] },
+  DRY_RUNNING: { category: "OVERHEATING", base: 15, rules: [["dry_running_check", "yes", 55], ["overheating_location", "seal_area", 15], ["temperature_rise_pattern", "sudden", 15], ["seal_flush_status", "lost_or_low", 10]] },
+  PIPE_STRAIN: { category: "VIBRATION", base: 12, rules: [["pipe_strain_signs", "yes", 45], ["vibration_extent", "piping", 15], ["vibration_direction", "axial", 5], ["recent_maintenance", "yes_part_replaced", 5]] },
+  REVERSE_ROTATION: { category: "START_FAILURE", base: 10, rules: [["rotation_direction", "reversed", 70], ["recent_wiring_work", "yes", 15]] },
+  WEAR_RING_WEAR: { category: "FLOW_LOW", base: 12, rules: [["flow_decline_pattern", "gradual", 20], ["pressure_pattern", "steady_decline", 20], ["impeller_history", "wear_or_damage_known", 20], ["recent_maintenance", "no_long_term", 10], ["strainer_clogged", "no", 5]] },
+  MECHANICAL_SEAL_WEAR: { category: "LEAKAGE", base: 20, rules: [["leak_location", "shaft_seal", 40], ["seal_service_time", "long_overdue", 30], ["leak_amount", "minor_seeping", 10], ["seal_flush_status", "lost_or_low", 25], ["vibration_location", "bearing_housing", 10], ["vibration_location", "coupling", 10], ["pipe_strain_signs", "yes", 10]] },
   GASKET_DAMAGE: { category: "LEAKAGE", base: 15, rules: [["leak_location", "casing_joint", 40], ["leak_amount", "significant", 20]] },
-  LUBRICATION_FAILURE: { category: "OVERHEATING", base: 20, rules: [["overheating_location", "bearing", 35], ["lubrication_check", "overdue", 35], ["temperature_rise_pattern", "gradual", 15]] },
-  DEADHEAD_OPERATION: { category: "OVERHEATING", base: 15, rules: [["deadhead_history", "yes", 45], ["temperature_rise_pattern", "sudden", 20]] },
-  MOTOR_OVERLOAD: { category: "MOTOR_ELECTRICAL", base: 20, rules: [["motor_trip_type", "overcurrent", 35], ["recent_load_change", "yes", 25], ["impeller_locked_check", "free_rotation", 10]] },
+  LUBRICATION_FAILURE: { category: "OVERHEATING", base: 20, rules: [["overheating_location", "bearing", 35], ["lubrication_check", "overdue", 35], ["temperature_rise_pattern", "gradual", 15], ["oil_condition", "contaminated", 35], ["oil_condition", "emulsified", 30]] },
+  DEADHEAD_OPERATION: { category: "OVERHEATING", base: 15, rules: [["deadhead_history", "yes", 45], ["temperature_rise_pattern", "sudden", 20], ["low_flow_operation", "yes", 20]] },
+  MOTOR_OVERLOAD: { category: "MOTOR_ELECTRICAL", base: 20, rules: [["motor_trip_type", "overcurrent", 35], ["recent_load_change", "yes", 25], ["impeller_locked_check", "free_rotation", 10], ["motor_current_over", "yes", 25], ["fluid_property_exceeds", "yes", 25]] },
   IMPELLER_JAMMED: { category: "MOTOR_ELECTRICAL", base: 15, rules: [["impeller_locked_check", "locked_or_hard_to_rotate", 45], ["motor_trip_type", "fail_to_start", 25]] },
   VOLTAGE_IMBALANCE: { category: "MOTOR_ELECTRICAL", base: 15, rules: [["voltage_check", "imbalanced", 45], ["motor_trip_type", "overcurrent", 15]] },
   AIRLOCK: { category: "START_FAILURE", base: 15, rules: [["priming_status", "incomplete_or_suspected_airlock", 45], ["start_failure_type", "trips_immediately", 15]] },
@@ -343,6 +424,22 @@ const ACTION_PLAN_DB = {
     immediate: [{ ko: "운전점이 BEP에서 크게 벗어나 저유량 운전 중인지 확인", en: "Check whether the pump is running far from BEP at low flow" }, { ko: "토출 밸브 개도를 조절해 맥동음이 변하는지 확인", en: "Adjust the discharge valve opening and see whether the pulsation noise changes" }],
     maintenance: [{ ko: "배관 길이·지지 상태에 따른 공진 가능성 및 에어 포켓 점검", en: "Check for piping resonance from length/support and for air pockets" }, { ko: "필요 시 최소유량 바이패스 또는 맥동 완화 장치 검토", en: "Consider a minimum-flow bypass or pulsation dampening if needed" }],
     escalation: [{ ko: "맥동과 함께 압력·전류 변동이 크면 정비 인력과 시스템 점검", en: "If pressure or current swings accompany the pulsation, check the system with maintenance staff" }] },
+  DRY_RUNNING: { severity: "HIGH",
+    immediate: [{ ko: "즉시 정지 — 씰 면과 웨어링이 수초 내 열 손상되고 로터가 소착될 수 있습니다", en: "Stop immediately — seal faces and wear rings can be heat-damaged within seconds and the rotor can seize" }, { ko: "흡입 탱크 액위, 흡입 밸브 개도, 프라이밍 상태 확인 후 케이싱 에어를 벤팅", en: "Check suction tank level, suction valve and prime, then vent the casing" }],
+    maintenance: [{ ko: "메카니컬 씰 면, O-링, 웨어링, 샤프트 슬리브 손상 점검 및 필요 시 교체", en: "Inspect and replace damaged mechanical seal faces, O-rings, wear rings and shaft sleeve" }, { ko: "저수위/무유체 감지 인터록과 시동 전 벤팅 절차 정비", en: "Install or fix a low-level / dry-run interlock and a pre-start venting procedure" }],
+    escalation: [{ ko: "소착이 의심되면 손으로 회전시켜 걸림을 확인하고 임의 재기동 금지", en: "If seizure is suspected, check by hand for binding and do not restart" }] },
+  PIPE_STRAIN: { severity: "MEDIUM",
+    immediate: [{ ko: "토출·흡입 플랜지를 풀었을 때 정렬값이 변하는지 다이얼 게이지로 확인", en: "Use a dial gauge to see whether alignment shifts when the suction/discharge flanges are loosened" }, { ko: "배관 지지대·행거 상태와 열팽창 구속 여부 확인", en: "Check pipe supports/hangers and any thermal-growth restraint" }],
+    maintenance: [{ ko: "배관 지지 보강 후 플랜지가 무리 없이 맞는 상태에서 재정렬", en: "Reinforce supports, then realign with the flanges mating without force" }, { ko: "소프트풋 측정 및 교정", en: "Measure and correct soft foot" }],
+    escalation: [{ ko: "씰·베어링 반복 파손이 있으면 배관 응력을 근본 원인으로 두고 RCA 진행", en: "If seals or bearings keep failing, treat pipe strain as a root cause and run an RCA" }] },
+  REVERSE_ROTATION: { severity: "HIGH",
+    immediate: [{ ko: "즉시 정지 — 역회전 시 나사식 임펠러가 풀리고 씰이 파손될 수 있습니다", en: "Stop immediately — reverse rotation can unscrew threaded impellers and destroy the seal" }, { ko: "전원 차단 후 3상 중 2상을 맞바꿔 결선 (전기 작업자가 수행)", en: "Isolate power and swap two of the three phases (by a qualified electrician)" }],
+    maintenance: [{ ko: "재기동 전 커플링을 분리한 상태에서 모터 단독 회전 방향 확인", en: "Before restart, check motor rotation alone with the coupling disconnected" }, { ko: "역회전으로 운전했다면 임펠러 체결 상태와 씰 점검", en: "If it ran in reverse, inspect impeller fastening and the seal" }],
+    escalation: [{ ko: "배선 작업 이력이 있으면 결선 전체를 전기 정비팀과 재확인", en: "If wiring work was recently done, have the electrical team recheck all connections" }] },
+  WEAR_RING_WEAR: { severity: "MEDIUM",
+    immediate: [{ ko: "유량·토출압이 서서히 떨어졌는지 설계 곡선과 비교", en: "Compare flow and discharge pressure against the design curve for gradual decline" }, { ko: "전원 전압·VFD 출력 주파수가 정상인지 함께 확인", en: "Also check supply voltage and VFD output frequency" }],
+    maintenance: [{ ko: "임펠러·케이싱 웨어링 간극 측정 후 규격 초과 시 규격품으로 교체", en: "Measure impeller/casing wear-ring clearance and replace with spec parts if beyond limits" }],
+    escalation: [{ ko: "마모가 빠르면 입자 포함 유체나 캐비테이션이 원인인지 함께 점검", en: "If wear is fast, check for abrasive fluid or cavitation as the cause" }] },
   IMPELLER_UNBALANCE: { severity: "MEDIUM",
     immediate: [{ ko: "진동이 회전속도(1X)에 동기된 반경방향 진동인지 확인", en: "Check whether the vibration is radial and synchronous with running speed (1X)" }, { ko: "임펠러 이물질 부착·막힘 여부 확인 (점검구/분해 가능 시)", en: "Check the impeller for deposits or clogging (via inspection port or teardown)" }],
     maintenance: [{ ko: "임펠러 침식·마모·결손 점검 및 동밸런싱(밸런스 수정) 실시", en: "Inspect the impeller for erosion, wear or missing material and dynamically balance it" }, { ko: "수리 후 재조립 시 키·슬리브 조립 상태 확인", en: "After repair, verify key and sleeve assembly" }],
@@ -377,8 +474,8 @@ const ACTION_PLAN_DB = {
     escalation: [{ ko: "누설 부위 특정이 어려우면 배관 전문 정비팀 투입 요청", en: "If the leak location is hard to pinpoint, request a piping specialist team" }] },
   MECHANICAL_SEAL_WEAR: { severity: "MEDIUM",
     immediate: [{ ko: "누설 부위와 누설량 기록", en: "Record the leak location and amount" }, { ko: "씰 냉각/플러싱 라인 정상 작동 여부 확인", en: "Check that the seal cooling/flushing line is working normally" }],
-    maintenance: [{ ko: "메커니컬씰 교체(사용시간 대비 교체주기 확인)", en: "Replace the mechanical seal (check service hours against the replacement interval)" }],
-    escalation: [{ ko: "누설량이 급증하면 즉시 운전 중지 후 씰 교체 필요", en: "If leakage suddenly increases, stop operation immediately and replace the seal" }] },
+    maintenance: [{ ko: "메커니컬씰 교체(사용시간 대비 교체주기 확인)", en: "Replace the mechanical seal (check service hours against the replacement interval)" }, { ko: "씰만 교체하지 말고 축 정렬, 베어링 유격, 배관 응력, 진동을 함께 점검 — 씰 파손의 상당수는 다른 결함의 결과(피해자)여서 원인을 두고 교체하면 며칠 내 재발합니다", en: "Do not replace the seal alone: also check alignment, bearing clearance, pipe strain and vibration. Many seal failures are victims of another defect and will recur within days if the root cause is left" }],
+    escalation: [{ ko: "누설량이 급증하거나 분사형으로 흐르면 즉시 운전 중지 후 씰 교체 필요", en: "If leakage suddenly increases or becomes a steady stream/spray, stop operation immediately and replace the seal" }] },
   GASKET_DAMAGE: { severity: "LOW",
     immediate: [{ ko: "케이싱 조인트 볼트 조임 토크 확인", en: "Check the casing joint bolt tightening torque" }, { ko: "개스킷 열화 상태 육안 점검", en: "Visually inspect the gasket for degradation" }],
     maintenance: [{ ko: "개스킷 교체 및 규정 토크로 재조립", en: "Replace the gasket and reassemble to the specified torque" }],
@@ -441,7 +538,19 @@ const CRITICAL_ANSWER_SIGNALS = [
   ["deadhead_history", "yes", "deadhead_operation_confirmed"],
   ["voltage_check", "imbalanced", "voltage_imbalance_confirmed"],
   ["impeller_locked_check", "locked_or_hard_to_rotate", "impeller_jammed_confirmed"],
+  // 아래는 "즉시 정지" 판단 규칙(Stop-or-Run)에 해당하는 신호
+  ["dry_running_check", "yes", "dry_running_confirmed"],
+  ["leak_amount", "spray_stream", "seal_stream_leak"],
+  ["oil_condition", "emulsified", "oil_emulsification"],
+  ["vibration_level", "critical", "vibration_over_limit"],
+  ["vibration_spike", "yes", "vibration_baseline_spike"],
+  ["rotation_direction", "reversed", "reverse_rotation_confirmed"],
+  ["noise_persists_after_adjust", "yes", "persistent_cavitation_noise"],
 ];
+const STOP_ANSWER_SIGNAL_CODES = new Set([
+  "dry_running_confirmed", "seal_stream_leak", "oil_emulsification", "vibration_over_limit",
+  "vibration_baseline_spike", "reverse_rotation_confirmed", "persistent_cavitation_noise",
+]);
 const SIGNAL_LABEL = {
   smoke_or_burning_smell: { ko: "연기/탄내", en: "Smoke / burning smell" },
   electrical_spark: { ko: "전기 스파크", en: "Electrical spark" },
@@ -451,6 +560,13 @@ const SIGNAL_LABEL = {
   deadhead_operation_confirmed: { ko: "Dead-head 운전 확인", en: "Dead-head operation confirmed" },
   voltage_imbalance_confirmed: { ko: "전압 불균형 확인", en: "Voltage imbalance confirmed" },
   impeller_jammed_confirmed: { ko: "임펠러 고착 확인", en: "Impeller seizure confirmed" },
+  dry_running_confirmed: { ko: "무유체 운전 확인", en: "Dry running confirmed" },
+  seal_stream_leak: { ko: "씰 분사형·연속 누설", en: "Seal spraying / steady-stream leak" },
+  oil_emulsification: { ko: "윤활유 유화(우윳빛)", en: "Milky (emulsified) oil" },
+  vibration_over_limit: { ko: "진동 7.1 mm/s RMS 초과", en: "Vibration above 7.1 mm/s RMS" },
+  vibration_baseline_spike: { ko: "진동이 평소 대비 2배 이상 급증", en: "Vibration at least 2× baseline" },
+  reverse_rotation_confirmed: { ko: "모터 역회전 확인", en: "Reverse rotation confirmed" },
+  persistent_cavitation_noise: { ko: "조치 후에도 캐비테이션 소음 지속", en: "Cavitation noise persists after adjustments" },
 };
 // 시뮬레이션(오프라인) 분류용 키워드 — 마찬가지로 한/영 둘 다 매칭한다.
 const KEYWORD_HINTS = {
@@ -567,7 +683,10 @@ function escalationCheck(rawText, answers, baseSeverity = "MEDIUM") {
   if (!forceHigh && answerSignals.length > 0 && SEVERITY_META[severity].idx < SEVERITY_META.MEDIUM_HIGH.idx) {
     severity = "MEDIUM_HIGH";
   }
-  return { severity, matchedSignals: all, shouldInterrupt: severity === "HIGH" };
+  // 즉시 정지 판단 규칙에 걸리는 답변은 진단을 막지 않고(원인을 계속 보여주되) 심각도를 긴급으로 올린다.
+  const stopSignals = answerSignals.filter((c) => STOP_ANSWER_SIGNAL_CODES.has(c));
+  if (stopSignals.length > 0) severity = "HIGH";
+  return { severity, matchedSignals: all, stopSignals, shouldInterrupt: forceHigh };
 }
 
 function simulateClassifier(text) {
@@ -701,6 +820,7 @@ function generateActionPlan(finalResult, rawText, answers, lang) {
     statement,
     template,
     related,
+    stopSignals: esc.stopSignals,
     interrupted: esc.shouldInterrupt,
   };
 }
@@ -801,6 +921,7 @@ const STR = {
     diagAnalyzing: "수집된 정보를 바탕으로 원인을 분석하고 있습니다…",
     diagInconclusive: "입력하신 정보만으로는 원인을 확신하기 어렵습니다. 전문가 상담을 권장드리며, 추가 증상이 있으면 다시 말씀해주세요.",
     diagFollowUp: "조치 후에도 증상이 계속되면 다시 알려주세요 — 추가 진단을 도와드리겠습니다.",
+    planStopNotice: "즉시 정지 기준에 해당하는 답변이 있습니다. 가동을 멈추고 아래 조치를 진행하세요.",
     diagInterruptedLate: "답변 내용을 종합한 결과 안전 위험 신호가 감지되었습니다.\n즉시 가동을 중지하고 전문가/안전관리자에게 연락하세요.",
     diffIntro: "원인을 조금 더 좁히기 위해 몇 가지만 더 확인할게요.",
     historyTitle: (n) => `진단 기록 (${n}건)`,
@@ -876,6 +997,7 @@ const STR = {
     diagAnalyzing: "Analyzing the cause based on the information collected…",
     diagInconclusive: "We can't confidently determine the cause from the information provided. We recommend consulting a specialist, and please let us know if there are additional symptoms.",
     diagFollowUp: "If the symptom continues after taking action, let us know again — we'll help with further diagnosis.",
+    planStopNotice: "Your answers meet an immediate-stop criterion. Stop the pump and follow the steps below.",
     diagInterruptedLate: "Based on your answers, a safety hazard signal was detected.\nStop operation immediately and contact a specialist/safety officer.",
     diffIntro: "Let's check a couple more things to narrow down the cause.",
     historyTitle: (n) => `Diagnosis history (${n})`,
@@ -1255,6 +1377,85 @@ function NpshQuestion({ question, onSubmit, onSkip, lang }) {
   );
 }
 
+// 진동 속도 입력 질문 — ISO 10816-3 기준(4.5 / 7.1 mm/s RMS)과 평소(베이스라인) 대비 급증 여부를 자동 판정한다.
+const VIB_STR = {
+  ko: {
+    velocity: "현재 진동 속도 (mm/s RMS)",
+    baseline: "평소(정상 시) 진동 속도 (mm/s RMS, 선택)",
+    hint: "기준: 4.5 미만 정상 · 4.5~7.1 주의 · 7.1 초과 위험. 평소 대비 2배 이상 급증하면 절대값과 무관하게 경고합니다.",
+    confirm: "판정하기",
+    skip: "측정 안 함 / 건너뛰기",
+    invalid: "진동 속도는 0보다 크고 200 이하의 숫자여야 합니다.",
+  },
+  en: {
+    velocity: "Current vibration velocity (mm/s RMS)",
+    baseline: "Normal (baseline) velocity (mm/s RMS, optional)",
+    hint: "Limits: below 4.5 acceptable · 4.5-7.1 investigate · above 7.1 critical. A jump of 2× or more over baseline is flagged regardless of the absolute value.",
+    confirm: "Evaluate",
+    skip: "Not measured / Skip",
+    invalid: "Velocity must be a number above 0 and up to 200.",
+  },
+};
+
+function VibrationMeasureQuestion({ question, onSubmit, onSkip, lang }) {
+  const v = VIB_STR[lang];
+  const [velocity, setVelocity] = useState("");
+  const [baseline, setBaseline] = useState("");
+  const [error, setError] = useState(false);
+  const num = (x) => (x.trim() === "" ? null : Number(x));
+  const velN = num(velocity);
+  const baseN = num(baseline);
+  const canSubmit = velN !== null && !isNaN(velN);
+
+  const submit = () => {
+    if (!canSubmit) return;
+    const result = evaluateVibration({ velocity: velN, baseline: baseN === null || isNaN(baseN) ? undefined : baseN });
+    if (!result || velN <= 0) {
+      setError(true);
+      return;
+    }
+    setError(false);
+    onSubmit(result);
+  };
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontFamily: T.sans, fontSize: 14, color: T.text, marginBottom: 8, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px" }}>
+        {bi(question.text, lang)}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div>
+          <div style={NPSH_LABEL_STYLE}>{v.velocity}</div>
+          <input type="number" inputMode="decimal" min="0" step="any" value={velocity} onChange={(e) => setVelocity(e.target.value)} placeholder="4.5" style={NPSH_INPUT_STYLE} />
+        </div>
+        <div>
+          <div style={NPSH_LABEL_STYLE}>{v.baseline}</div>
+          <input type="number" inputMode="decimal" min="0" step="any" value={baseline} onChange={(e) => setBaseline(e.target.value)} placeholder="1.5" style={NPSH_INPUT_STYLE} />
+        </div>
+        <div style={{ fontFamily: T.mono, fontSize: 10, color: T.textFaint }}>{v.hint}</div>
+        {error && <div style={{ fontFamily: T.sans, fontSize: 12, color: T.red }}>{v.invalid}</div>}
+        <div style={{ display: "flex", gap: 6 }}>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canSubmit}
+            style={{ fontFamily: T.sans, fontSize: 13, color: T.bg, background: T.amber, border: "none", borderRadius: 8, padding: "6px 14px", cursor: canSubmit ? "pointer" : "default", opacity: canSubmit ? 1 : 0.5 }}
+          >
+            {v.confirm}
+          </button>
+          <button
+            type="button"
+            onClick={onSkip}
+            style={{ fontFamily: T.mono, fontSize: 12, color: T.textMuted, background: "transparent", border: `1px solid ${T.border}`, borderRadius: 8, padding: "6px 12px", cursor: "pointer" }}
+          >
+            {v.skip}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CategoryConfirmQuestion({ onAnswer, lang }) {
   return (
     <div style={{ marginBottom: 12 }}>
@@ -1411,6 +1612,17 @@ function ActionPlanCard({ plan, lang }) {
         <div style={{ background: "rgba(229,72,77,0.12)", border: `1px solid ${T.red}`, borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 13, display: "flex", gap: 8 }}>
           <AlertTriangle size={16} color={T.red} style={{ flexShrink: 0, marginTop: 1 }} />
           <span>{t.planSafetyNotice}</span>
+        </div>
+      )}
+
+      {plan.stopSignals?.length > 0 && !plan.interrupted && (
+        <div style={{ background: "rgba(229,72,77,0.12)", border: `1px solid ${T.red}`, borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 13, display: "flex", gap: 8 }}>
+          <AlertTriangle size={16} color={T.red} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ whiteSpace: "pre-line" }}>
+            {t.planStopNotice}
+            {"\n"}
+            {plan.stopSignals.map((c) => bi(SIGNAL_LABEL[c], lang)).join(" · ")}
+          </span>
         </div>
       )}
 
@@ -1846,6 +2058,14 @@ export default function PumpTroubleshootingChatbot() {
       answerPatch: { npsh_detail: result },
     });
 
+  // 진동 속도 입력 제출 — 정상/주의/위험과 베이스라인 급증 여부를 답변으로 저장하고 판정 근거를 보여준다.
+  const handleVibrationSubmit = (result) =>
+    handleAnswer("vibration_measure", result.level, {
+      label: vibrationAnswerLabel(result, lang),
+      botMessage: describeVibration(result, lang),
+      answerPatch: { vibration_level: result.level, vibration_spike: result.spike ? "yes" : "no", vibration_detail: result },
+    });
+
   const runDiagnosis = async (finalAnswers) => {
     setStage("diagnosing");
     setLoading(true);
@@ -1877,6 +2097,10 @@ export default function PumpTroubleshootingChatbot() {
     if (finalResult.candidates.length === 0) {
       setLoading(false);
       setStage("done");
+      // 원인은 못 좁혔어도 즉시 정지 기준에 해당하는 답변이 있으면 그 경고는 반드시 보여준다.
+      if (lateCheck.stopSignals?.length > 0) {
+        pushMessage({ role: "bot", type: "alert", content: `${t.planStopNotice}\n${lateCheck.stopSignals.map((c) => bi(SIGNAL_LABEL[c], lang)).join(" · ")}` });
+      }
       pushMessage({ role: "bot", type: "text", content: t.diagInconclusive });
       logHistoryEntry({ outcome: "inconclusive", reason: t.reasonInconclusive });
       return;
@@ -2057,6 +2281,9 @@ export default function PumpTroubleshootingChatbot() {
                   <Bubble role="user">{m.answerLabel}</Bubble>
                 </div>
               );
+            }
+            if (m.question.type === "vib_measure") {
+              return <VibrationMeasureQuestion key={i} question={m.question} onSubmit={handleVibrationSubmit} onSkip={() => handleAnswer(m.question.key, null)} lang={lang} />;
             }
             if (m.question.type === "npsh") {
               return <NpshQuestion key={i} question={m.question} onSubmit={handleNpshSubmit} onSkip={() => handleAnswer(m.question.key, null)} lang={lang} />;
