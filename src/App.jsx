@@ -137,9 +137,21 @@ const CHECKLISTS = {
       ["vibration_only", { ko: "진동이 주, 소음은 크지 않음", en: "Mainly vibration, little noise" }],
     ] },
     { key: "vibration_direction", text: { ko: "진동이 가장 크게 나타나는 방향은 어디인가요?", en: "In which direction is the vibration strongest?" }, options: [
-      ["radial", { ko: "반경방향 (수평·수직, 축과 직각)", en: "Radial (horizontal/vertical, perpendicular to the shaft)" }],
+      ["radial_horizontal", { ko: "수평 반경방향 (축과 직각, 좌우)", en: "Horizontal radial (perpendicular to the shaft, side to side)" }],
+      ["radial_vertical", { ko: "수직 방향 (상하)", en: "Vertical (up and down)" }],
       ["axial", { ko: "축방향 (축과 나란한 방향)", en: "Axial (parallel to the shaft)" }],
       ["no_dominant", { ko: "방향성이 뚜렷하지 않고 불규칙함", en: "No dominant direction, irregular" }],
+    ] },
+    { key: "bearing_vib_direction", text: { ko: "베어링 하우징에서는 어느 방향 진동이 가장 큰가요? (측정/체감)", en: "At the bearing housing, which direction has the largest vibration? (measured or felt)" }, options: [
+      ["all_directions", { ko: "수평·수직·축방향 모두 큼", en: "Large in horizontal, vertical and axial" }],
+      ["radial", { ko: "반경방향(수평·수직)만 큼", en: "Mainly radial (horizontal/vertical)" }],
+      ["axial", { ko: "축방향이 특히 큼", en: "Mainly axial" }],
+      ["not_checked", { ko: "방향별로 확인 안 함", en: "Direction not checked" }],
+    ] },
+    { key: "vibration_extent", text: { ko: "진동이 어디까지 퍼져 있나요?", en: "How far does the vibration extend?" }, options: [
+      ["local", { ko: "특정 부위(베어링·커플링 등)만", en: "Only a specific spot (bearing, coupling, etc.)" }],
+      ["whole_equipment", { ko: "펌프·모터·베이스 전체가 함께 흔들림", en: "Whole pump, motor and baseplate shake together" }],
+      ["piping", { ko: "배관까지 크게 흔들림", en: "Piping also shakes strongly" }],
     ] },
     { key: "vibration_frequency", text: { ko: "진동 분석(FFT)을 했다면 주된 주파수 성분은 무엇인가요?", en: "If you ran vibration analysis (FFT), what is the dominant frequency component?" }, options: [
       ["1x", { ko: "1X (회전주파수)", en: "1X (running speed)" }],
@@ -282,10 +294,10 @@ const CHECKLISTS = {
 
 const MATRIX = {
   CAVITATION: { category: "NOISE", base: 30, rules: [["noise_type", "gravel_sound", 40], ["noise_type", "metallic_friction", -10], ["noise_vibration_together", "both", 15], ["vibration_frequency", "broadband", 10], ["vibration_direction", "no_dominant", 5], ["flow_change", "yes", 12], ["pressure_change", "yes", 8], ["suction_gauge_abnormal", "yes", 25], ["operating_point_changed", "yes", 15], ["recent_maintenance", "yes_part_replaced", -5]] },
-  BEARING_WEAR: { category: "VIBRATION", base: 25, rules: [["noise_type", "metallic_friction", 35], ["noise_type", "periodic_knocking", 30], ["vibration_location", "bearing_housing", 30], ["vibration_frequency", "high_freq", 25], ["overheating_bearing", "yes", 25], ["lubrication_check", "overdue", 20], ["recent_maintenance", "no_long_term", 10]] },
+  BEARING_WEAR: { category: "VIBRATION", base: 25, rules: [["noise_type", "metallic_friction", 35], ["noise_type", "periodic_knocking", 30], ["vibration_location", "bearing_housing", 30], ["bearing_vib_direction", "all_directions", 25], ["bearing_vib_direction", "axial", 10], ["vibration_extent", "local", 10], ["vibration_frequency", "high_freq", 25], ["overheating_bearing", "yes", 25], ["lubrication_check", "overdue", 20], ["recent_maintenance", "no_long_term", 10]] },
   MISALIGNMENT: { category: "VIBRATION", base: 20, rules: [["vibration_location", "coupling", 30], ["vibration_direction", "axial", 30], ["vibration_frequency", "2x", 30], ["noise_vibration_together", "vibration_only", 10], ["recent_maintenance", "yes_part_replaced", 15]] },
-  IMPELLER_UNBALANCE: { category: "VIBRATION", base: 15, rules: [["vibration_direction", "radial", 25], ["vibration_frequency", "1x", 35], ["noise_vibration_together", "vibration_only", 15], ["vibration_location", "motor", 5], ["recent_maintenance", "yes_part_replaced", 10]] },
-  WEAK_FOUNDATION: { category: "VIBRATION", base: 15, rules: [["foundation_condition", "defective", 45], ["vibration_location", "foundation", 30], ["noise_vibration_together", "vibration_only", 10]] },
+  IMPELLER_UNBALANCE: { category: "VIBRATION", base: 15, rules: [["vibration_direction", "radial_horizontal", 25], ["vibration_direction", "radial_vertical", 20], ["bearing_vib_direction", "radial", 15], ["vibration_frequency", "1x", 35], ["noise_vibration_together", "vibration_only", 15], ["vibration_location", "motor", 5], ["recent_maintenance", "yes_part_replaced", 10]] },
+  WEAK_FOUNDATION: { category: "VIBRATION", base: 15, rules: [["foundation_condition", "defective", 45], ["vibration_extent", "whole_equipment", 30], ["vibration_extent", "piping", 20], ["vibration_location", "foundation", 30], ["vibration_direction", "radial_vertical", 15], ["noise_vibration_together", "vibration_only", 10]] },
   AIR_ENTRAINMENT: { category: "NOISE", base: 15, rules: [["noise_location", "suction_side", 20], ["suction_gauge_abnormal", "yes", 20], ["flow_change", "yes", 8], ["pressure_change", "yes", 7], ["suction_level_dropped", "yes", 20]] },
   IMPELLER_WEAR_OR_CLOG: { category: "FLOW_LOW", base: 20, rules: [["flow_decline_pattern", "gradual", 25], ["strainer_clogged", "yes", 30], ["suction_gauge_abnormal", "yes", 15], ["valve_opening_checked", "normal", 10]] },
   VALVE_MISCONFIGURED: { category: "FLOW_LOW", base: 15, rules: [["valve_opening_checked", "abnormal_or_partially_closed", 45], ["flow_decline_pattern", "sudden", 20]] },
@@ -460,7 +472,10 @@ function evaluateCauseProbability(answers) {
     }
     // 이 원인이 이론적으로 받을 수 있는 최대 점수(자기 자신의 base + 모든 긍정 가중치 합)
     // 대비 실제 받은 점수의 비율로 정규화한다.
-    let maxAchievable = spec.base + spec.rules.filter(([, , w]) => w > 0).reduce((sum, [, , w]) => sum + w, 0);
+    // 같은 질문에 대한 서로 배타적인 답(예: 수평/수직)은 하나만 해당하므로 질문당 최대 가중치만 더한다.
+    const maxByKey = {};
+    for (const [k, , w] of spec.rules) if (w > 0) maxByKey[k] = Math.max(maxByKey[k] || 0, w);
+    let maxAchievable = spec.base + Object.values(maxByKey).reduce((sum, w) => sum + w, 0);
 
     if (cause === "CAVITATION" && answers.npsh_margin in NPSH_CAVITATION_ADJUST) {
       const adj = NPSH_CAVITATION_ADJUST[answers.npsh_margin];
