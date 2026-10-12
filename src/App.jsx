@@ -296,7 +296,9 @@ const CHECKLISTS = {
 };
 
 const MATRIX = {
-  CAVITATION: { category: "NOISE", base: 30, rules: [["noise_type", "gravel_sound", 40], ["noise_type", "metallic_friction", -10], ["noise_vibration_together", "both", 15], ["noise_vibration_together", "vibration_only", -40], ["vibration_frequency", "broadband", 10], ["vibration_direction", "no_dominant", 5], ["flow_change", "yes", 12], ["pressure_change", "yes", 8], ["suction_gauge_abnormal", "yes", 25], ["operating_point_changed", "yes", 15], ["recent_maintenance", "yes_part_replaced", -5]] },
+  CAVITATION: { category: "NOISE", base: 30, rules: [["noise_type", "gravel_sound", 40], ["noise_type", "metallic_friction", -10], ["noise_vibration_together", "both", 15], ["noise_vibration_together", "vibration_only", -10], ["vibration_frequency", "broadband", 10], ["vibration_direction", "no_dominant", 5], ["flow_change", "yes", 12], ["pressure_change", "yes", 8], ["suction_gauge_abnormal", "yes", 25], ["operating_point_changed", "yes", 15], ["recent_maintenance", "yes_part_replaced", -5]],
+    // 진동이 수반되면서 유량 변화가 있으면 캐비테이션 가능성이 높다 (조합 가점)
+    combos: [[{ flow_change: "yes", noise_vibration_together: ["both", "vibration_only"] }, 35], [{ flow_change: "yes", suction_gauge_abnormal: "yes", noise_vibration_together: ["both", "vibration_only"] }, 25]] },
   PART_RUBBING: { category: "NOISE", base: 15, rules: [["noise_type", "metallic_friction", 35], ["noise_type", "periodic_knocking", 15], ["recent_maintenance", "yes_part_replaced", 20], ["noise_vibration_together", "noise_only", 10], ["overheating_bearing", "no", 5]] },
   FLUID_PULSATION: { category: "NOISE", base: 15, rules: [["noise_type", "pulsating_beat", 40], ["noise_location", "discharge_side", 15], ["operating_point_changed", "yes", 20], ["pressure_change", "yes", 15], ["flow_change", "yes", 10]] },
   BEARING_WEAR: { category: "VIBRATION", base: 25, rules: [["noise_type", "metallic_friction", 35], ["noise_type", "periodic_knocking", 30], ["vibration_location", "bearing_housing", 30], ["bearing_vib_direction", "all_directions", 25], ["bearing_vib_direction", "axial", 10], ["vibration_extent", "local", 10], ["vibration_frequency", "high_freq", 25], ["overheating_bearing", "yes", 25], ["lubrication_check", "overdue", 20], ["recent_maintenance", "no_long_term", 10]] },
@@ -489,6 +491,14 @@ function evaluateCauseProbability(answers) {
     const maxByKey = {};
     for (const [k, , w] of spec.rules) if (w > 0) maxByKey[k] = Math.max(maxByKey[k] || 0, w);
     let maxAchievable = spec.base + Object.values(maxByKey).reduce((sum, w) => sum + w, 0);
+    // 여러 답변이 동시에 맞을 때만 붙는 조합 가점
+    for (const [conds, weight] of spec.combos || []) {
+      const hit = Object.entries(conds).every(([k, v]) => (Array.isArray(v) ? v.includes(answers[k]) : answers[k] === v));
+      if (hit) {
+        score += weight;
+        evidence.push(`${Object.keys(conds).join("+")} (${weight > 0 ? "+" : ""}${weight})`);
+      }
+    }
 
     if (cause === "CAVITATION" && answers.npsh_margin in NPSH_CAVITATION_ADJUST) {
       const adj = NPSH_CAVITATION_ADJUST[answers.npsh_margin];
@@ -506,7 +516,7 @@ function evaluateCauseProbability(answers) {
   const scored = candidates
     .map((c) => ({
       cause: c.cause,
-      score: Math.round((Math.max(0, c.raw) / c.maxAchievable) * 1000) / 10,
+      score: Math.min(100, Math.round((Math.max(0, c.raw) / c.maxAchievable) * 1000) / 10),
       evidence: c.evidence,
     }))
     // 감점으로 0점이 된 후보는 "유력 원인"으로 내세우지 않는다.
