@@ -1077,7 +1077,7 @@ function NpshQuestion({ question, onSubmit, onSkip, lang }) {
     const lossN = num(loss);
     const result = computeNpsh({
       npshr: npshrN,
-      suctionHead: flooded ? -Math.abs(heightN) : Math.abs(heightN),
+      suctionHead: flooded ? Math.abs(heightN) : -Math.abs(heightN),
       tempC: tempN === null || isNaN(tempN) ? DEFAULT_TEMP_C : tempN,
       frictionLoss: lossN === null || isNaN(lossN) ? DEFAULT_FRICTION_LOSS_M : lossN,
     });

@@ -1,11 +1,11 @@
 /**
  * NPSH(유효흡입수두) 여유 판정 — 화면/네트워크와 무관한 순수 함수 모음.
  *
- * 부호 규칙(한국 펌프 업계 관례): 흡입높이 hs
- *   +  = 흡상 (액면이 펌프 중심보다 아래, 끌어올림)
- *   −  = 압입 (액면이 펌프 중심보다 위, 물이 걸려 들어옴)
+ * 부호 규칙: 흡입높이 hs
+ *   −  = 흡상 (액면이 펌프 중심보다 아래, 끌어올림) — 예: -5 m
+ *   +  = 압입 (액면이 펌프 중심보다 위, 물이 걸려 들어옴)
  *
- * NPSHa = Ha − Hv − hs − hf
+ * NPSHa = Ha − Hv + hs − hf
  *   Ha: 대기압 수두, Hv: 액체 증기압 수두, hs: 흡입높이(위 부호), hf: 흡입배관 손실
  * 판정: NPSHa < NPSHr → insufficient (캐비테이션 발생)
  *       NPSHa < max(1.3 × NPSHr, NPSHr + 0.5) → marginal (여유 부족)
@@ -50,7 +50,7 @@ export function computeNpsh({ npshr, suctionHead, tempC = DEFAULT_TEMP_C, fricti
   if (tempC < 0 || tempC > 100) return null;
 
   const hv = vaporHeadM(tempC);
-  const npsha = ATM_HEAD_M - hv - suctionHead - frictionLoss;
+  const npsha = ATM_HEAD_M - hv + suctionHead - frictionLoss;
   const required = Math.max(npshr * MARGIN_RATIO, npshr + MARGIN_MIN_M);
   const level = npsha < npshr ? "insufficient" : npsha < required ? "marginal" : "sufficient";
   return {
@@ -76,10 +76,10 @@ const NPSHR_RE = new RegExp(
   `(?:npsh\\s*\\(?\\s*r(?:e|eq|equired)?\\s*\\)?|필요\\s*npsh|요구\\s*npsh|required\\s*npsh|필요\\s*유효\\s*흡입\\s*(?:양정|수두))${GAP}${NUM}`,
   "i"
 );
-// 한국식 부호(흡상 +, 압입 −)로 읽는 표현
-const SUCTION_KO_RE = new RegExp(`(?:흡입\\s*(?:높이|양정|고)|흡상\\s*(?:높이|양정)?|suction\\s*lift)${GAP}${NUM}`, "i");
-// 영어권 관례(압입 +)라 부호를 뒤집어 읽는 표현
-const SUCTION_EN_FLOODED_RE = new RegExp(`(?:static\\s*suction\\s*head|suction\\s*head)${GAP}${NUM}`, "i");
+// 부호 있는 값을 그대로 읽는 표현 (− = 흡상, + = 압입)
+const SUCTION_SIGNED_RE = new RegExp(`(?:흡입\\s*(?:높이|양정|고)|static\\s*suction\\s*head|suction\\s*head)${GAP}${NUM}`, "i");
+// 크기만 말하는 흡상 표현 → 항상 음수
+const LIFT_RE = new RegExp(`(?:흡상\\s*(?:높이|양정)?|suction\\s*lift)${GAP}${NUM}`, "i");
 const FLOODED_RE = new RegExp(`(?:압입\\s*(?:높이|양정)?|flooded\\s*suction)${GAP}(\\d+(?:\\.\\d+)?)`, "i");
 const TEMP_RE = new RegExp(`(?:액체\\s*온도|유체\\s*온도|수온|liquid\\s*temp(?:erature)?|water\\s*temp(?:erature)?)${GAP}(\\d+(?:\\.\\d+)?)`, "i");
 
@@ -104,11 +104,14 @@ export function extractNpshInputs(text) {
   const npshr = grab(text, NPSHR_RE);
   if (npshr !== null) out.npshr = npshr;
 
-  let hs = grab(text, SUCTION_KO_RE);
-  if (hs === null) hs = grab(text, SUCTION_EN_FLOODED_RE, { negate: true });
+  let hs = grab(text, SUCTION_SIGNED_RE);
+  if (hs === null) {
+    const l = grab(text, LIFT_RE);
+    if (l !== null) hs = -Math.abs(l);
+  }
   if (hs === null) {
     const f = grab(text, FLOODED_RE);
-    if (f !== null) hs = -Math.abs(f);
+    if (f !== null) hs = Math.abs(f);
   }
   if (hs !== null) out.suctionHead = hs;
 
@@ -129,28 +132,28 @@ export function describeNpsh(r, lang = "ko") {
   const sign = (n) => (n > 0 ? `+${n}` : `${n}`);
   if (lang === "en") {
     const setup =
-      r.suctionHead < 0
-        ? `flooded suction (liquid level ${Math.abs(r.suctionHead)} m above the pump)`
-        : r.suctionHead > 0
-        ? `suction lift (liquid level ${r.suctionHead} m below the pump)`
+      r.suctionHead > 0
+        ? `flooded suction (liquid level ${r.suctionHead} m above the pump)`
+        : r.suctionHead < 0
+        ? `suction lift (liquid level ${Math.abs(r.suctionHead)} m below the pump)`
         : "liquid level at pump centerline";
     const verdict = { insufficient: "INSUFFICIENT — cavitation expected", marginal: "thin margin", sufficient: "sufficient" }[r.level];
     return (
       `NPSH check: ${setup}.\n` +
-      `NPSHa ≈ ${r.ha} (atmosphere) − ${r.hv} (vapor, ${r.tempC}°C water) ${r.suctionHead >= 0 ? "−" : "+"} ${Math.abs(r.suctionHead)} (suction) − ${r.frictionLoss} (piping loss) = ${r.npsha} m\n` +
+      `NPSHa ≈ ${r.ha} (atmosphere) − ${r.hv} (vapor, ${r.tempC}°C water) ${r.suctionHead >= 0 ? "+" : "−"} ${Math.abs(r.suctionHead)} (suction) − ${r.frictionLoss} (piping loss) = ${r.npsha} m\n` +
       `NPSHr ${r.npshr} m → margin ${sign(r.margin)} m (target ≥ ${r.required} m): ${verdict}.`
     );
   }
   const setup =
-    r.suctionHead < 0
-      ? `압입 조건 (액면이 펌프보다 ${Math.abs(r.suctionHead)} m 위)`
-      : r.suctionHead > 0
-      ? `흡상 조건 (액면이 펌프보다 ${r.suctionHead} m 아래)`
+    r.suctionHead > 0
+      ? `압입 조건 (액면이 펌프보다 ${r.suctionHead} m 위)`
+      : r.suctionHead < 0
+      ? `흡상 조건 (액면이 펌프보다 ${Math.abs(r.suctionHead)} m 아래)`
       : "액면이 펌프 중심과 같은 높이";
   const verdict = { insufficient: "부족 — 캐비테이션 발생 조건", marginal: "여유 부족", sufficient: "충분" }[r.level];
   return (
     `NPSH 검토: ${setup}으로 해석했습니다.\n` +
-    `NPSHa ≈ ${r.ha}(대기압) − ${r.hv}(증기압, ${r.tempC}°C 물) ${r.suctionHead >= 0 ? "−" : "+"} ${Math.abs(r.suctionHead)}(흡입높이) − ${r.frictionLoss}(배관손실) = ${r.npsha} m\n` +
+    `NPSHa ≈ ${r.ha}(대기압) − ${r.hv}(증기압, ${r.tempC}°C 물) ${r.suctionHead >= 0 ? "+" : "−"} ${Math.abs(r.suctionHead)}(흡입높이) − ${r.frictionLoss}(배관손실) = ${r.npsha} m\n` +
     `NPSHr ${r.npshr} m 대비 여유 ${sign(r.margin)} m (권장 ${r.required} m 이상) → ${verdict}.`
   );
 }
