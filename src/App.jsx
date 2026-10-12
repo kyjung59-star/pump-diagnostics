@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { AlertTriangle, Send, RotateCcw, Activity, Wrench, ShieldAlert, ChevronRight, History as HistoryIcon, X, Trash2, Globe, Droplets } from "lucide-react";
+import { AlertTriangle, Send, RotateCcw, Undo2, Activity, Wrench, ShieldAlert, ChevronRight, History as HistoryIcon, X, Trash2, Globe, Droplets } from "lucide-react";
+import { computeNpsh, computeNpshFromText, describeNpsh, npshAnswerLabel, DEFAULT_TEMP_C, DEFAULT_FRICTION_LOSS_M } from "./npsh.js";
 
 /* =====================================================================
    THEME — industrial diagnostic console
@@ -114,6 +115,8 @@ const CHECKLISTS = {
     { key: "suction_level_dropped", text: { ko: "최근 흡입조/저수조 수위가 낮아진 적이 있나요?", en: "Has the suction tank/reservoir level recently dropped?" }, options: [
       ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
     ] },
+    // 숫자 입력형 질문 — 증상 설명에 NPSHr/흡입높이가 이미 있으면 자동 계산되어 이 질문은 건너뛴다.
+    { key: "npsh_margin", type: "npsh", text: { ko: "NPSH(유효흡입수두) 여유를 확인해볼까요? 펌프 사양서의 NPSHr와 흡입 조건을 알고 계시면 입력해주세요.", en: "Shall we check the NPSH margin? If you know the pump's NPSHr and the suction conditions, enter them below." }, options: [] },
   ],
   FLOW_LOW: [
     { key: "flow_decline_pattern", text: { ko: "유량 저하가 점진적인가요, 급격한가요?", en: "Is the flow decline gradual or sudden?" }, options: [
@@ -378,6 +381,13 @@ const KEYWORD_HINTS = {
 /* =====================================================================
    CORE LOGIC — ported from Python prototype
    ===================================================================== */
+// NPSH 여유 판정(npsh_margin 답변)이 캐비테이션 점수에 주는 보정치.
+// - 부족/여유 부족: NPSHa가 NPSHr에 못 미치거나 빠듯하다 → 캐비테이션 근거 강화
+// - 충분: 흡입 조건상 캐비테이션이 날 이유가 없다 → 소음 증상만으로 캐비테이션을 단정하지 않도록 크게 감점
+const NPSH_CAVITATION_ADJUST = { insufficient: 35, marginal: 15, sufficient: -35 };
+// NPSH 충분 시 캐비테이션 점수 상한(만점 대비 비율). 30% < 40%(= '함께 확인' 표시 기준)이라 보조 후보로도 올라오지 않는다.
+const NPSH_SUFFICIENT_CAVITATION_CAP = 0.3;
+
 function evaluateCauseProbability(answers) {
   const candidates = [];
   for (const [cause, spec] of Object.entries(MATRIX)) {
@@ -391,7 +401,19 @@ function evaluateCauseProbability(answers) {
     }
     // 이 원인이 이론적으로 받을 수 있는 최대 점수(자기 자신의 base + 모든 긍정 가중치 합)
     // 대비 실제 받은 점수의 비율로 정규화한다.
-    const maxAchievable = spec.base + spec.rules.filter(([, , w]) => w > 0).reduce((sum, [, , w]) => sum + w, 0);
+    let maxAchievable = spec.base + spec.rules.filter(([, , w]) => w > 0).reduce((sum, [, , w]) => sum + w, 0);
+
+    if (cause === "CAVITATION" && answers.npsh_margin in NPSH_CAVITATION_ADJUST) {
+      const adj = NPSH_CAVITATION_ADJUST[answers.npsh_margin];
+      score += adj;
+      if (adj > 0) maxAchievable += adj; // 긍정 근거는 다른 긍정 규칙과 같은 방식으로 분모에 포함
+      if (answers.npsh_margin === "sufficient") {
+        // NPSHa가 충분하면 "NPSH 부족으로 인한 캐비테이션"은 배제된다. 소음/압력계 같은 다른 답변이 아무리
+        // 캐비테이션 쪽이어도 점수가 "함께 확인할 사항"(40점) 문턱을 넘지 못하도록 상한을 둔다.
+        score = Math.min(score, Math.round(maxAchievable * NPSH_SUFFICIENT_CAVITATION_CAP));
+      }
+      evidence.push(`npsh_margin=${answers.npsh_margin} (${adj > 0 ? "+" : ""}${adj})`);
+    }
     candidates.push({ cause, raw: score, maxAchievable, evidence });
   }
   const scored = candidates
@@ -400,7 +422,8 @@ function evaluateCauseProbability(answers) {
       score: Math.round((Math.max(0, c.raw) / c.maxAchievable) * 1000) / 10,
       evidence: c.evidence,
     }))
-    .filter((c) => c.evidence.length > 0)
+    // 감점으로 0점이 된 후보는 "유력 원인"으로 내세우지 않는다.
+    .filter((c) => c.evidence.length > 0 && c.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
 
@@ -498,10 +521,16 @@ async function classifySymptomCategory(rawText, lang) {
 }
 
 async function llmQualitativeReview(rawText, answers, ruleResult, lang) {
+  // NPSH는 코드로 계산한 확정값이다. LLM이 이를 뒤집어 캐비테이션을 "새 후보"로 다시 올리지 못하게 명시한다.
+  const npshNote = answers?.npsh_detail
+    ? lang === "en"
+      ? `\n\n[NPSH calculation — computed deterministically, do not contradict]\n${describeNpsh(answers.npsh_detail, "en")}\nIf NPSHa comfortably exceeds NPSHr, do not propose cavitation as a new candidate or raise its score.`
+      : `\n\n[NPSH 계산 결과 — 코드로 확정한 값이므로 뒤집지 마세요]\n${describeNpsh(answers.npsh_detail, "ko")}\nNPSHa가 NPSHr보다 충분히 크면 캐비테이션을 새 후보로 제안하거나 점수를 올리지 마세요.`
+    : "";
   const prompt =
     lang === "en"
-      ? `You are the validator for a pump troubleshooting diagnosis. Don't re-score from scratch — review the rule-based scores below using the user's original wording and propose adjustments only.\n\n[Original text]\n${rawText}\n\n[Answers]\n${JSON.stringify(answers)}\n\n[Rule-based scores]\n${JSON.stringify(ruleResult.candidates)}\n\nReply with JSON only, and write "reason" in English:\n{"adjustments": [{"cause":"CODE","delta":integer(-20~20),"reason":"..."}], "new_candidate": {"cause":"CODE or free name","score":integer,"reason":"..."} or null}`
-      : `당신은 펌프 트러블슈팅 진단의 검증자입니다. 아래 룰 기반 스코어를 새로 매기지 말고, 사용자 원문 맥락을 반영해 조정치만 제안하세요.\n\n[원문]\n${rawText}\n\n[답변]\n${JSON.stringify(answers)}\n\n[룰 스코어]\n${JSON.stringify(ruleResult.candidates)}\n\nJSON만 답하세요 ("reason"은 한국어로 작성):\n{"adjustments": [{"cause":"코드","delta":정수(-20~20),"reason":"근거"}], "new_candidate": {"cause":"코드또는이름","score":정수,"reason":"근거"} 또는 null}`;
+      ? `You are the validator for a pump troubleshooting diagnosis. Don't re-score from scratch — review the rule-based scores below using the user's original wording and propose adjustments only.\n\n[Original text]\n${rawText}\n\n[Answers]\n${JSON.stringify(answers)}\n\n[Rule-based scores]\n${JSON.stringify(ruleResult.candidates)}${npshNote}\n\nReply with JSON only, and write "reason" in English:\n{"adjustments": [{"cause":"CODE","delta":integer(-20~20),"reason":"..."}], "new_candidate": {"cause":"CODE or free name","score":integer,"reason":"..."} or null}`
+      : `당신은 펌프 트러블슈팅 진단의 검증자입니다. 아래 룰 기반 스코어를 새로 매기지 말고, 사용자 원문 맥락을 반영해 조정치만 제안하세요.\n\n[원문]\n${rawText}\n\n[답변]\n${JSON.stringify(answers)}\n\n[룰 스코어]\n${JSON.stringify(ruleResult.candidates)}${npshNote}\n\nJSON만 답하세요 ("reason"은 한국어로 작성):\n{"adjustments": [{"cause":"코드","delta":정수(-20~20),"reason":"근거"}], "new_candidate": {"cause":"코드또는이름","score":정수,"reason":"근거"} 또는 null}`;
   try {
     const result = await callClaude(prompt, 500);
     return { ...result, usedLLM: true };
@@ -510,19 +539,22 @@ async function llmQualitativeReview(rawText, answers, ruleResult, lang) {
   }
 }
 
-function mergeDiagnosis(ruleResult, llmReview) {
+function mergeDiagnosis(ruleResult, llmReview, answers = {}) {
   const CAP = 20;
   const map = {};
   ruleResult.candidates.forEach((c) => (map[c.cause] = { ...c, evidence: [...c.evidence] }));
   const notes = [];
+  // NPSH가 충분하다고 계산된 경우, LLM이 캐비테이션을 다시 끌어올리지 못하게 막는다(안전장치).
+  const npshRulesOutCavitation = answers.npsh_margin === "sufficient";
   for (const adj of llmReview.adjustments || []) {
     if (!(adj.cause in map)) continue;
+    if (npshRulesOutCavitation && adj.cause === "CAVITATION" && adj.delta > 0) continue;
     const delta = Math.max(-CAP, Math.min(CAP, adj.delta));
     map[adj.cause].score = Math.round(Math.min(100, Math.max(0, map[adj.cause].score + delta)) * 10) / 10;
     map[adj.cause].evidence.push(`[LLM ${delta >= 0 ? "+" : ""}${delta}] ${adj.reason}`);
     notes.push(`${adj.cause}: ${delta >= 0 ? "+" : ""}${delta} — ${adj.reason}`);
   }
-  if (llmReview.new_candidate) {
+  if (llmReview.new_candidate && !(npshRulesOutCavitation && llmReview.new_candidate.cause === "CAVITATION")) {
     const nc = llmReview.new_candidate;
     map[nc.cause] = { cause: nc.cause, score: Math.min(nc.score, CAP + 30), evidence: [`[LLM new] ${nc.reason}`] };
     notes.push(`New candidate ${nc.cause}: ${nc.reason}`);
@@ -694,6 +726,22 @@ const STR = {
     reasonLateSignal: "체크리스트 답변 종합 후 위험 신호 감지",
     reasonInconclusive: "확신 가능한 원인 후보 없음",
     processing: "처리 중…",
+    undoButton: "이전으로 (답변 수정)",
+    undoHint: "마지막 입력을 취소하고 다시 답할 수 있어요.",
+    npshRLabel: "NPSHr (m)",
+    npshRPlaceholder: "예: 5",
+    npshConditionLabel: "흡입 조건",
+    npshLift: "흡상 (액면이 펌프보다 아래)",
+    npshFlooded: "압입 (액면이 펌프보다 위)",
+    npshHeightLabel: "흡입높이 (m, 크기만)",
+    npshHeightPlaceholder: "예: 5",
+    npshTempLabel: "액체 온도 (°C)",
+    npshLossLabel: "흡입배관 손실 (m)",
+    npshOptionalHint: `온도·배관손실은 비워두면 물 ${DEFAULT_TEMP_C}°C, ${DEFAULT_FRICTION_LOSS_M} m로 가정합니다.`,
+    npshConfirm: "계산하기",
+    npshSkip: "모름 / 건너뛰기",
+    npshInvalid: "NPSHr는 0보다 커야 하고, 높이는 0 이상이어야 합니다.",
+    npshAutoNote: "증상 설명에서 NPSHr와 흡입높이를 찾아 자동 계산했습니다. 해석이 다르면 아래 '이전으로'를 눌러 다시 입력하세요.",
   },
   en: {
     greeting: "Hello. This is the pump diagnostics chatbot. What issue are you having? Please describe the symptom freely.",
@@ -753,6 +801,22 @@ const STR = {
     reasonLateSignal: "Hazard signal detected after reviewing checklist answers",
     reasonInconclusive: "No confident cause candidate",
     processing: "Processing…",
+    undoButton: "Go back (edit answer)",
+    undoHint: "Cancel your last input and answer again.",
+    npshRLabel: "NPSHr (m)",
+    npshRPlaceholder: "e.g., 5",
+    npshConditionLabel: "Suction condition",
+    npshLift: "Suction lift (liquid below pump)",
+    npshFlooded: "Flooded suction (liquid above pump)",
+    npshHeightLabel: "Height (m, magnitude only)",
+    npshHeightPlaceholder: "e.g., 5",
+    npshTempLabel: "Liquid temperature (°C)",
+    npshLossLabel: "Suction piping loss (m)",
+    npshOptionalHint: `If left blank, water at ${DEFAULT_TEMP_C}°C and ${DEFAULT_FRICTION_LOSS_M} m piping loss are assumed.`,
+    npshConfirm: "Calculate",
+    npshSkip: "Don't know / Skip",
+    npshInvalid: "NPSHr must be greater than 0 and the height must be 0 or more.",
+    npshAutoNote: "Found NPSHr and suction height in your description and calculated automatically. If the interpretation is wrong, press 'Go back' below and re-enter.",
   },
 };
 
@@ -917,6 +981,7 @@ function Bubble({ role, children }) {
           fontSize: 14,
           lineHeight: 1.6,
           color: T.text,
+          whiteSpace: "pre-line",
         }}
       >
         {children}
@@ -983,6 +1048,109 @@ function ChoiceQuestion({ question, onAnswer, lang }) {
         >
           {STR[lang].skipOption}
         </button>
+      </div>
+    </div>
+  );
+}
+
+const NPSH_INPUT_STYLE = { width: "100%", boxSizing: "border-box", background: T.panel, border: `1px solid ${T.border}`, borderRadius: 8, padding: "6px 10px", color: T.text, fontFamily: T.mono, fontSize: 13, outline: "none" };
+const NPSH_LABEL_STYLE = { fontFamily: T.mono, fontSize: 11, color: T.textMuted, marginBottom: 3 };
+
+// NPSH 숫자 입력 질문 — 부호 혼동을 없애기 위해 "흡상/압입"을 버튼으로 고르고 높이는 크기만 입력받는다.
+function NpshQuestion({ question, onSubmit, onSkip, lang }) {
+  const t = STR[lang];
+  const [npshr, setNpshr] = useState("");
+  const [flooded, setFlooded] = useState(true);
+  const [height, setHeight] = useState("");
+  const [temp, setTemp] = useState("");
+  const [loss, setLoss] = useState("");
+  const [error, setError] = useState(false);
+
+  const num = (v) => (v.trim() === "" ? null : Number(v));
+  const npshrN = num(npshr);
+  const heightN = num(height);
+  const canSubmit = npshrN !== null && heightN !== null && !isNaN(npshrN) && !isNaN(heightN);
+
+  const submit = () => {
+    if (!canSubmit) return;
+    const tempN = num(temp);
+    const lossN = num(loss);
+    const result = computeNpsh({
+      npshr: npshrN,
+      suctionHead: flooded ? -Math.abs(heightN) : Math.abs(heightN),
+      tempC: tempN === null || isNaN(tempN) ? DEFAULT_TEMP_C : tempN,
+      frictionLoss: lossN === null || isNaN(lossN) ? DEFAULT_FRICTION_LOSS_M : lossN,
+    });
+    if (!result || heightN < 0) {
+      setError(true);
+      return;
+    }
+    setError(false);
+    onSubmit(result);
+  };
+
+  const toggleStyle = (active) => ({
+    flex: 1,
+    fontFamily: T.sans,
+    fontSize: 12.5,
+    color: active ? T.amber : T.text,
+    background: active ? "rgba(242,169,59,0.14)" : T.panelAlt,
+    border: `1px solid ${active ? T.amber : T.borderStrong}`,
+    borderRadius: 8,
+    padding: "6px 8px",
+    cursor: "pointer",
+  });
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontFamily: T.sans, fontSize: 14, color: T.text, marginBottom: 8, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 14px" }}>
+        {bi(question.text, lang)}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div>
+          <div style={NPSH_LABEL_STYLE}>{t.npshRLabel}</div>
+          <input type="number" inputMode="decimal" min="0" step="any" value={npshr} onChange={(e) => setNpshr(e.target.value)} placeholder={t.npshRPlaceholder} style={NPSH_INPUT_STYLE} />
+        </div>
+        <div>
+          <div style={NPSH_LABEL_STYLE}>{t.npshConditionLabel}</div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button type="button" onClick={() => setFlooded(true)} style={toggleStyle(flooded)}>{flooded ? "✓ " : ""}{t.npshFlooded}</button>
+            <button type="button" onClick={() => setFlooded(false)} style={toggleStyle(!flooded)}>{!flooded ? "✓ " : ""}{t.npshLift}</button>
+          </div>
+        </div>
+        <div>
+          <div style={NPSH_LABEL_STYLE}>{t.npshHeightLabel}</div>
+          <input type="number" inputMode="decimal" min="0" step="any" value={height} onChange={(e) => setHeight(e.target.value)} placeholder={t.npshHeightPlaceholder} style={NPSH_INPUT_STYLE} />
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <div style={NPSH_LABEL_STYLE}>{t.npshTempLabel}</div>
+            <input type="number" inputMode="decimal" value={temp} onChange={(e) => setTemp(e.target.value)} placeholder={String(DEFAULT_TEMP_C)} style={NPSH_INPUT_STYLE} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={NPSH_LABEL_STYLE}>{t.npshLossLabel}</div>
+            <input type="number" inputMode="decimal" min="0" step="any" value={loss} onChange={(e) => setLoss(e.target.value)} placeholder={String(DEFAULT_FRICTION_LOSS_M)} style={NPSH_INPUT_STYLE} />
+          </div>
+        </div>
+        <div style={{ fontFamily: T.mono, fontSize: 10, color: T.textFaint }}>{t.npshOptionalHint}</div>
+        {error && <div style={{ fontFamily: T.sans, fontSize: 12, color: T.red }}>{t.npshInvalid}</div>}
+        <div style={{ display: "flex", gap: 6 }}>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canSubmit}
+            style={{ fontFamily: T.sans, fontSize: 13, color: T.bg, background: T.amber, border: "none", borderRadius: 8, padding: "6px 14px", cursor: canSubmit ? "pointer" : "default", opacity: canSubmit ? 1 : 0.4 }}
+          >
+            {t.npshConfirm}
+          </button>
+          <button
+            type="button"
+            onClick={onSkip}
+            style={{ fontFamily: T.mono, fontSize: 12, color: T.textMuted, background: "transparent", border: `1px solid ${T.border}`, borderRadius: 8, padding: "6px 12px", cursor: "pointer" }}
+          >
+            {t.npshSkip}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1203,6 +1371,8 @@ export default function PumpTroubleshootingChatbot() {
   const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
   const [loading, setLoading] = useState(false);
+  // "이전으로" — 사용자 입력(증상 전송/선택/답변) 직전의 대화 상태를 쌓아두는 스냅샷 스택
+  const [undoStack, setUndoStack] = useState([]);
   const scrollRef = useRef(null);
 
   useEffect(() => {
@@ -1214,6 +1384,39 @@ export default function PumpTroubleshootingChatbot() {
   }, []);
 
   const pushMessage = (msg) => setMessages((prev) => [...prev, msg]);
+
+  // 사용자가 무언가를 입력/선택하기 "직전"의 상태를 저장한다. restoreInput은 되돌렸을 때 입력창에 다시 채워 줄 글자.
+  const pushUndo = (restoreInput = "") => {
+    const snap = { messages, stage, rawText, categories, answers, diffQueue, diffAsked, severity, signals, heatReturnStage, restoreInput };
+    setUndoStack((prev) => [...prev.slice(-49), snap]);
+  };
+
+  const handleUndo = () => {
+    if (loading || undoStack.length === 0) return;
+    const snap = undoStack[undoStack.length - 1];
+    setUndoStack((prev) => prev.slice(0, -1));
+    setMessages(snap.messages);
+    setStage(snap.stage);
+    setRawText(snap.rawText);
+    setCategories(snap.categories);
+    setAnswers(snap.answers);
+    setDiffQueue(snap.diffQueue);
+    setDiffAsked(snap.diffAsked);
+    setSeverity(snap.severity);
+    setSignals(snap.signals);
+    setHeatReturnStage(snap.heatReturnStage);
+    setInputText(snap.restoreInput || "");
+  };
+
+  // 증상 설명/메모에 NPSHr와 흡입높이가 함께 있으면 바로 NPSHa를 계산해 답변으로 등록한다.
+  // 이미 같은 값으로 등록되어 있으면 아무것도 하지 않는다.
+  const applyNpshFromText = (text) => {
+    const npsh = computeNpshFromText(text);
+    if (!npsh) return;
+    if (answers.npsh_detail && JSON.stringify(answers.npsh_detail) === JSON.stringify(npsh)) return;
+    setAnswers((prev) => ({ ...prev, npsh_margin: npsh.level, npsh_detail: npsh }));
+    pushMessage({ role: "bot", type: "text", content: `${describeNpsh(npsh, lang)}\n${t.npshAutoNote}` });
+  };
 
   // 언어 전환 시, 아직 아무 대화도 없는 최초 인사말만 새 언어로 교체한다.
   const handleLangChange = (nextLang) => {
@@ -1332,6 +1535,7 @@ export default function PumpTroubleshootingChatbot() {
   };
 
   const handleCategoryConfirm = (accepted, cats) => {
+    pushUndo();
     setMessages((prev) => {
       const updated = [...prev];
       const lastIdx = updated.length - 1;
@@ -1343,7 +1547,7 @@ export default function PumpTroubleshootingChatbot() {
 
     if (accepted) {
       setCategories(cats);
-      startChecklist(cats, {});
+      startChecklist(cats, answers); // 증상 설명에서 자동 계산된 NPSH 답변 등을 유지한다
     } else {
       setStage("category_picker");
       pushMessage({ role: "bot", type: "text", content: t.pickerPrompt });
@@ -1352,6 +1556,7 @@ export default function PumpTroubleshootingChatbot() {
   };
 
   const handleCategoryPickerConfirm = (selected) => {
+    pushUndo();
     setMessages((prev) => {
       const updated = [...prev];
       const lastIdx = updated.length - 1;
@@ -1361,12 +1566,13 @@ export default function PumpTroubleshootingChatbot() {
       return updated;
     });
     setCategories(selected);
-    startChecklist(selected, {});
+    startChecklist(selected, answers);
   };
 
   const handleSend = async () => {
     const text = inputText.trim();
     if (!text || loading) return;
+    pushUndo(text); // 되돌리면 방금 입력한 글자가 입력창에 다시 채워져 수정할 수 있다
     setInputText("");
     setRawText(text);
     pushMessage({ role: "user", type: "text", content: text });
@@ -1374,6 +1580,7 @@ export default function PumpTroubleshootingChatbot() {
 
     const textSignals = detectTextSignals(text);
     setSignals(textSignals);
+    applyNpshFromText(text);
     const hardHit = textSignals.some((s) => HARD_SIGNAL_CODES.has(s));
 
     if (hardHit) {
@@ -1401,6 +1608,7 @@ export default function PumpTroubleshootingChatbot() {
   const handleSideNote = async () => {
     const text = inputText.trim();
     if (!text || loading) return;
+    pushUndo(text);
     setInputText("");
     pushMessage({ role: "user", type: "text", content: text });
 
@@ -1409,6 +1617,7 @@ export default function PumpTroubleshootingChatbot() {
     const heatHit = textSignals.includes("severe_overheating");
 
     setRawText((prev) => `${prev} ${text}`.trim());
+    applyNpshFromText(`${rawText} ${text}`.trim()); // NPSHr와 흡입높이를 나눠서 적어도 합쳐서 찾는다
     setSignals((prev) => Array.from(new Set([...prev, ...textSignals])));
 
     if (hardHit) {
@@ -1458,6 +1667,7 @@ export default function PumpTroubleshootingChatbot() {
   };
 
   const handleHeatTempSubmit = async (tempC) => {
+    pushUndo();
     const result = classifyBearingTemp(tempC, lang);
 
     setMessages((prev) => {
@@ -1474,6 +1684,7 @@ export default function PumpTroubleshootingChatbot() {
   };
 
   const handleHeatTempFallback = () => {
+    pushUndo();
     setMessages((prev) => {
       const updated = [...prev];
       const lastIdx = updated.length - 1;
@@ -1486,6 +1697,7 @@ export default function PumpTroubleshootingChatbot() {
   };
 
   const handleHeatClarify = async (value) => {
+    pushUndo();
     const opt = HEAT_CLARIFY_OPTIONS.find((o) => o.value === value);
 
     setMessages((prev) => {
@@ -1501,19 +1713,23 @@ export default function PumpTroubleshootingChatbot() {
     await applyHeatSeverityAndProceed(opt.severity, alertContent);
   };
 
-  const handleAnswer = (key, value) => {
-    const newAnswers = { ...answers, [key]: value };
+  // extra: { label } 답변 말풍선 문구 직접 지정 / { botMessage } 답변 직후 보여줄 설명 / { answerPatch } 함께 저장할 값
+  const handleAnswer = (key, value, extra = {}) => {
+    pushUndo();
+    const newAnswers = { ...answers, [key]: value, ...(extra.answerPatch || {}) };
     setAnswers(newAnswers);
 
     setMessages((prev) => {
       const updated = [...prev];
       const lastIdx = updated.length - 1;
       if (updated[lastIdx]?.type === "choice") {
-        const optLabel = value === null ? t.skipOption : bi(updated[lastIdx].question.options.find((o) => o[0] === value)?.[1], lang);
+        const optLabel =
+          extra.label ?? (value === null ? t.skipOption : bi(updated[lastIdx].question.options.find((o) => o[0] === value)?.[1], lang));
         updated[lastIdx] = { ...updated[lastIdx], answered: true, answerLabel: optLabel };
       }
       return updated;
     });
+    if (extra.botMessage) pushMessage({ role: "bot", type: "text", content: extra.botMessage });
 
     const nextQ = nextChecklistQuestion(newAnswers);
     if (nextQ) {
@@ -1523,6 +1739,14 @@ export default function PumpTroubleshootingChatbot() {
     }
   };
 
+  // NPSH 입력 폼 제출 — 계산 결과를 답변(충분/여유 부족/부족)으로 저장하고, 계산 근거를 대화에 보여준다.
+  const handleNpshSubmit = (result) =>
+    handleAnswer("npsh_margin", result.level, {
+      label: npshAnswerLabel(result, lang),
+      botMessage: describeNpsh(result, lang),
+      answerPatch: { npsh_detail: result },
+    });
+
   const runDiagnosis = async (finalAnswers) => {
     setStage("diagnosing");
     setLoading(true);
@@ -1530,7 +1754,7 @@ export default function PumpTroubleshootingChatbot() {
 
     const ruleResult = evaluateCauseProbability(finalAnswers);
     const llmReview = await llmQualitativeReview(rawText, finalAnswers, ruleResult, lang);
-    const finalResult = mergeDiagnosis(ruleResult, llmReview);
+    const finalResult = mergeDiagnosis(ruleResult, llmReview, finalAnswers);
 
     pushMessage({
       role: "bot",
@@ -1587,7 +1811,10 @@ export default function PumpTroubleshootingChatbot() {
     setHeatReturnStage("intake");
     setSeverity("LOW");
     setSignals([]);
+    setUndoStack([]);
   };
+
+  const canUndo = undoStack.length > 0 && !loading && stage !== "diagnosing" && !showHistory;
 
   const isChecklistStage = stage === "checklist";
   const inputDisabled = stage !== "intake" && stage !== "done" && stage !== "blocked" && !isChecklistStage;
@@ -1732,6 +1959,9 @@ export default function PumpTroubleshootingChatbot() {
                 </div>
               );
             }
+            if (m.question.type === "npsh") {
+              return <NpshQuestion key={i} question={m.question} onSubmit={handleNpshSubmit} onSkip={() => handleAnswer(m.question.key, null)} lang={lang} />;
+            }
             return <ChoiceQuestion key={i} question={m.question} onAnswer={handleAnswer} lang={lang} />;
           }
           if (m.type === "heat_temp") {
@@ -1752,6 +1982,28 @@ export default function PumpTroubleshootingChatbot() {
 
       {/* Input area */}
       <div style={{ borderTop: `1px solid ${T.border}`, padding: 14 }}>
+        {canUndo && (
+          <button
+            onClick={handleUndo}
+            title={t.undoHint}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontFamily: T.mono,
+              fontSize: 12,
+              color: T.amber,
+              background: "transparent",
+              border: `1px solid ${T.amber}`,
+              borderRadius: 8,
+              padding: "6px 12px",
+              marginBottom: 10,
+              cursor: "pointer",
+            }}
+          >
+            <Undo2 size={13} /> {t.undoButton}
+          </button>
+        )}
         {stage === "done" || stage === "blocked" ? (
           <button
             onClick={handleRestart}
