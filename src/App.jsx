@@ -296,7 +296,7 @@ const CHECKLISTS = {
 };
 
 const MATRIX = {
-  CAVITATION: { category: "NOISE", base: 30, rules: [["noise_type", "gravel_sound", 40], ["noise_type", "metallic_friction", -10], ["noise_vibration_together", "both", 15], ["noise_vibration_together", "vibration_only", -10], ["vibration_frequency", "broadband", 10], ["vibration_direction", "no_dominant", 5], ["flow_change", "yes", 12], ["pressure_change", "yes", 8], ["suction_gauge_abnormal", "yes", 25], ["operating_point_changed", "yes", 15], ["recent_maintenance", "yes_part_replaced", -5]],
+  CAVITATION: { category: "NOISE", base: 30, rules: [["noise_type", "gravel_sound", 40], ["noise_type", "metallic_friction", -10], ["noise_vibration_together", "both", 15], ["vibration_frequency", "broadband", 10], ["vibration_direction", "no_dominant", 5], ["flow_change", "yes", 12], ["pressure_change", "yes", 8], ["suction_gauge_abnormal", "yes", 25], ["operating_point_changed", "yes", 15], ["recent_maintenance", "yes_part_replaced", -5]],
     // 캐비테이션의 전형: 유량 변화 + 압력(흡입압력 포함) 변화가 있고, 소음과 진동이 함께 나타남 (조합 가점)
     combos: [[{ flow_change: "yes", noise_vibration_together: "both", $any: [{ pressure_change: "yes" }, { suction_gauge_abnormal: "yes" }] }, 50]] },
   PART_RUBBING: { category: "NOISE", base: 15, rules: [["noise_type", "metallic_friction", 35], ["noise_type", "periodic_knocking", 15], ["recent_maintenance", "yes_part_replaced", 20], ["noise_vibration_together", "noise_only", 10], ["overheating_bearing", "no", 5]] },
