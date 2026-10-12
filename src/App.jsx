@@ -37,7 +37,8 @@ const SEVERITY_META = {
    / action_plan_db.json ; all display strings are bilingual { ko, en }
    ===================================================================== */
 const CATEGORY_LABEL = {
-  NOISE_VIBRATION: { ko: "소음/진동", en: "Noise / Vibration" },
+  NOISE: { ko: "소음", en: "Noise" },
+  VIBRATION: { ko: "진동", en: "Vibration" },
   FLOW_LOW: { ko: "유량 부족/변동", en: "Low / Fluctuating Flow" },
   PRESSURE_ABNORMAL: { ko: "압력 이상", en: "Abnormal Pressure" },
   LEAKAGE: { ko: "누설", en: "Leakage" },
@@ -54,6 +55,8 @@ const CAUSE_LABEL = {
   CAVITATION: { ko: "캐비테이션", en: "Cavitation" },
   BEARING_WEAR: { ko: "베어링 마모", en: "Bearing wear" },
   MISALIGNMENT: { ko: "축 정렬 불량", en: "Shaft misalignment" },
+  IMPELLER_UNBALANCE: { ko: "임펠러 언밸런스", en: "Impeller unbalance" },
+  WEAK_FOUNDATION: { ko: "기초·베이스 불량", en: "Weak or defective foundation" },
   AIR_ENTRAINMENT: { ko: "공기 유입", en: "Air entrainment" },
   IMPELLER_WEAR_OR_CLOG: { ko: "임펠러 마모/막힘", en: "Impeller wear or clogging" },
   VALVE_MISCONFIGURED: { ko: "밸브 설정 이상", en: "Valve misconfiguration" },
@@ -72,7 +75,7 @@ const CAUSE_LABEL = {
 };
 
 const CHECKLISTS = {
-  NOISE_VIBRATION: [
+  NOISE: [
     { key: "noise_type", text: { ko: "소음의 종류는 어떤가요?", en: "What type of noise is it?" }, options: [
       ["gravel_sound", { ko: "자갈 굴러가는 소리", en: "Gravel-rolling sound" }],
       ["metallic_friction", { ko: "금속성 마찰음", en: "Metallic friction noise" }],
@@ -84,6 +87,11 @@ const CHECKLISTS = {
       ["discharge_side", { ko: "토출측", en: "Discharge side" }],
       ["motor_side", { ko: "모터측", en: "Motor side" }],
     ] },
+    { key: "noise_vibration_together", text: { ko: "소음과 진동이 함께 뚜렷하게 나타나나요?", en: "Do noise and vibration both appear distinctly?" }, options: [
+      ["both", { ko: "둘 다 뚜렷함", en: "Both are distinct" }],
+      ["noise_only", { ko: "소음이 주, 진동은 거의 없음", en: "Mainly noise, little vibration" }],
+      ["vibration_only", { ko: "진동이 주, 소음은 크지 않음", en: "Mainly vibration, little noise" }],
+    ] },
     { key: "flow_change", text: { ko: "유량에 변화가 있나요? (감소하거나 들쭉날쭉한 경우)", en: "Is there a change in flow? (reduced or fluctuating)" }, options: [
       ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
     ] },
@@ -93,19 +101,10 @@ const CHECKLISTS = {
     { key: "operating_point_changed", text: { ko: "최근 운전점(유량/양정)이 설계값 대비 변경되었나요?", en: "Has the operating point (flow/head) recently shifted from the design value?" }, options: [
       ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
     ] },
-    { key: "vibration_location", text: { ko: "진동이 느껴지는 부위는 어디인가요?", en: "Where do you feel the vibration?" }, options: [
-      ["motor", { ko: "모터", en: "Motor" }],
-      ["coupling", { ko: "커플링", en: "Coupling" }],
-      ["bearing_housing", { ko: "베어링 하우징", en: "Bearing housing" }],
-      ["piping", { ko: "배관", en: "Piping" }],
-      ["none", { ko: "없음", en: "None" }],
-    ] },
-    { key: "recent_maintenance", text: { ko: "최근 정비/부품 교체 이력이 있나요?", en: "Any recent maintenance or part replacement?" }, options: [
-      ["yes_part_replaced", { ko: "예 (부품 교체함)", en: "Yes (parts replaced)" }],
-      ["no_long_term", { ko: "아니오 (오래 정비 안함)", en: "No (not serviced for a long time)" }],
-      ["none", { ko: "특별한 이력 없음", en: "No notable history" }],
-    ] },
     { key: "suction_gauge_abnormal", text: { ko: "흡입측 압력계/진공계 수치에 이상이 있나요?", en: "Is the suction-side pressure/vacuum gauge reading abnormal?" }, options: [
+      ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
+    ] },
+    { key: "suction_level_dropped", text: { ko: "최근 흡입조/저수조 수위가 낮아진 적이 있나요?", en: "Has the suction tank/reservoir level recently dropped?" }, options: [
       ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
     ] },
     { key: "overheating_bearing", text: { ko: "베어링 부위에 과열이 동반되나요?", en: "Is overheating present at the bearing?" }, options: [
@@ -115,11 +114,57 @@ const CHECKLISTS = {
       ["recent", { ko: "최근 점검함", en: "Checked recently" }],
       ["overdue", { ko: "오래됨/미실시", en: "Overdue / not done" }],
     ] },
-    { key: "suction_level_dropped", text: { ko: "최근 흡입조/저수조 수위가 낮아진 적이 있나요?", en: "Has the suction tank/reservoir level recently dropped?" }, options: [
-      ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
+    { key: "recent_maintenance", text: { ko: "최근 정비/부품 교체 이력이 있나요?", en: "Any recent maintenance or part replacement?" }, options: [
+      ["yes_part_replaced", { ko: "예 (부품 교체함)", en: "Yes (parts replaced)" }],
+      ["no_long_term", { ko: "아니오 (오래 정비 안함)", en: "No (not serviced for a long time)" }],
+      ["none", { ko: "특별한 이력 없음", en: "No notable history" }],
     ] },
     // 숫자 입력형 질문 — 증상 설명에 NPSHr/흡입높이가 이미 있으면 자동 계산되어 이 질문은 건너뛴다.
     { key: "npsh_margin", type: "npsh", text: { ko: "NPSH(유효흡입수두) 여유를 확인해볼까요? 펌프 사양서의 NPSHr와 흡입 조건을 알고 계시면 입력해주세요.", en: "Shall we check the NPSH margin? If you know the pump's NPSHr and the suction conditions, enter them below." }, options: [] },
+  ],
+  VIBRATION: [
+    { key: "vibration_location", text: { ko: "진동이 가장 크게 느껴지는 부위는 어디인가요?", en: "Where is the vibration felt most strongly?" }, options: [
+      ["motor", { ko: "모터", en: "Motor" }],
+      ["coupling", { ko: "커플링", en: "Coupling" }],
+      ["bearing_housing", { ko: "베어링 하우징", en: "Bearing housing" }],
+      ["foundation", { ko: "베이스·기초 부위", en: "Baseplate / foundation" }],
+      ["piping", { ko: "배관", en: "Piping" }],
+      ["none", { ko: "없음", en: "None" }],
+    ] },
+    { key: "noise_vibration_together", text: { ko: "소음과 진동이 함께 뚜렷하게 나타나나요?", en: "Do noise and vibration both appear distinctly?" }, options: [
+      ["both", { ko: "둘 다 뚜렷함", en: "Both are distinct" }],
+      ["noise_only", { ko: "소음이 주, 진동은 거의 없음", en: "Mainly noise, little vibration" }],
+      ["vibration_only", { ko: "진동이 주, 소음은 크지 않음", en: "Mainly vibration, little noise" }],
+    ] },
+    { key: "vibration_direction", text: { ko: "진동이 가장 크게 나타나는 방향은 어디인가요?", en: "In which direction is the vibration strongest?" }, options: [
+      ["radial", { ko: "반경방향 (수평·수직, 축과 직각)", en: "Radial (horizontal/vertical, perpendicular to the shaft)" }],
+      ["axial", { ko: "축방향 (축과 나란한 방향)", en: "Axial (parallel to the shaft)" }],
+      ["no_dominant", { ko: "방향성이 뚜렷하지 않고 불규칙함", en: "No dominant direction, irregular" }],
+    ] },
+    { key: "vibration_frequency", text: { ko: "진동 분석(FFT)을 했다면 주된 주파수 성분은 무엇인가요?", en: "If you ran vibration analysis (FFT), what is the dominant frequency component?" }, options: [
+      ["1x", { ko: "1X (회전주파수)", en: "1X (running speed)" }],
+      ["2x", { ko: "2X 또는 그 배수", en: "2X or higher harmonics" }],
+      ["broadband", { ko: "불규칙·광대역 (랜덤)", en: "Random / broadband" }],
+      ["high_freq", { ko: "고주파 (베어링 결함 주파수 대역)", en: "High frequency (bearing defect range)" }],
+      ["not_measured", { ko: "측정 안 함 / 모름", en: "Not measured / unknown" }],
+    ] },
+    { key: "foundation_condition", text: { ko: "기초·베이스플레이트·앵커볼트 상태는 어떤가요?", en: "What is the condition of the foundation, baseplate and anchor bolts?" }, options: [
+      ["defective", { ko: "풀림·균열·그라우트 불량·약함", en: "Loose, cracked, poor grout, or weak" }],
+      ["normal", { ko: "이상 없음", en: "No problem found" }],
+      ["not_checked", { ko: "확인 안 함", en: "Not checked" }],
+    ] },
+    { key: "recent_maintenance", text: { ko: "최근 정비/부품 교체 이력이 있나요?", en: "Any recent maintenance or part replacement?" }, options: [
+      ["yes_part_replaced", { ko: "예 (부품 교체함)", en: "Yes (parts replaced)" }],
+      ["no_long_term", { ko: "아니오 (오래 정비 안함)", en: "No (not serviced for a long time)" }],
+      ["none", { ko: "특별한 이력 없음", en: "No notable history" }],
+    ] },
+    { key: "overheating_bearing", text: { ko: "베어링 부위에 과열이 동반되나요?", en: "Is overheating present at the bearing?" }, options: [
+      ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
+    ] },
+    { key: "lubrication_check", text: { ko: "윤활유/그리스 점검·교체 이력은 어떤가요?", en: "What's the lubricant/grease inspection or replacement history?" }, options: [
+      ["recent", { ko: "최근 점검함", en: "Checked recently" }],
+      ["overdue", { ko: "오래됨/미실시", en: "Overdue / not done" }],
+    ] },
   ],
   FLOW_LOW: [
     { key: "flow_decline_pattern", text: { ko: "유량 저하가 점진적인가요, 급격한가요?", en: "Is the flow decline gradual or sudden?" }, options: [
@@ -236,10 +281,12 @@ const CHECKLISTS = {
 };
 
 const MATRIX = {
-  CAVITATION: { category: "NOISE_VIBRATION", base: 30, rules: [["noise_type", "gravel_sound", 40], ["noise_type", "metallic_friction", -10], ["flow_change", "yes", 12], ["pressure_change", "yes", 8], ["suction_gauge_abnormal", "yes", 25], ["operating_point_changed", "yes", 15], ["recent_maintenance", "yes_part_replaced", -5]] },
-  BEARING_WEAR: { category: "NOISE_VIBRATION", base: 25, rules: [["noise_type", "metallic_friction", 35], ["noise_type", "periodic_knocking", 30], ["vibration_location", "bearing_housing", 30], ["overheating_bearing", "yes", 25], ["lubrication_check", "overdue", 20], ["recent_maintenance", "no_long_term", 10]] },
-  MISALIGNMENT: { category: "NOISE_VIBRATION", base: 20, rules: [["vibration_location", "coupling", 30], ["noise_type", "periodic_knocking", 20], ["recent_maintenance", "yes_part_replaced", 15]] },
-  AIR_ENTRAINMENT: { category: "NOISE_VIBRATION", base: 15, rules: [["noise_location", "suction_side", 20], ["suction_gauge_abnormal", "yes", 20], ["flow_change", "yes", 8], ["pressure_change", "yes", 7], ["suction_level_dropped", "yes", 20]] },
+  CAVITATION: { category: "NOISE", base: 30, rules: [["noise_type", "gravel_sound", 40], ["noise_type", "metallic_friction", -10], ["noise_vibration_together", "both", 15], ["vibration_frequency", "broadband", 10], ["vibration_direction", "no_dominant", 5], ["flow_change", "yes", 12], ["pressure_change", "yes", 8], ["suction_gauge_abnormal", "yes", 25], ["operating_point_changed", "yes", 15], ["recent_maintenance", "yes_part_replaced", -5]] },
+  BEARING_WEAR: { category: "VIBRATION", base: 25, rules: [["noise_type", "metallic_friction", 35], ["noise_type", "periodic_knocking", 30], ["vibration_location", "bearing_housing", 30], ["vibration_frequency", "high_freq", 25], ["overheating_bearing", "yes", 25], ["lubrication_check", "overdue", 20], ["recent_maintenance", "no_long_term", 10]] },
+  MISALIGNMENT: { category: "VIBRATION", base: 20, rules: [["vibration_location", "coupling", 30], ["vibration_direction", "axial", 30], ["vibration_frequency", "2x", 30], ["noise_vibration_together", "vibration_only", 10], ["recent_maintenance", "yes_part_replaced", 15]] },
+  IMPELLER_UNBALANCE: { category: "VIBRATION", base: 15, rules: [["vibration_direction", "radial", 25], ["vibration_frequency", "1x", 35], ["noise_vibration_together", "vibration_only", 15], ["vibration_location", "motor", 5], ["recent_maintenance", "yes_part_replaced", 10]] },
+  WEAK_FOUNDATION: { category: "VIBRATION", base: 15, rules: [["foundation_condition", "defective", 45], ["vibration_location", "foundation", 30], ["noise_vibration_together", "vibration_only", 10]] },
+  AIR_ENTRAINMENT: { category: "NOISE", base: 15, rules: [["noise_location", "suction_side", 20], ["suction_gauge_abnormal", "yes", 20], ["flow_change", "yes", 8], ["pressure_change", "yes", 7], ["suction_level_dropped", "yes", 20]] },
   IMPELLER_WEAR_OR_CLOG: { category: "FLOW_LOW", base: 20, rules: [["flow_decline_pattern", "gradual", 25], ["strainer_clogged", "yes", 30], ["suction_gauge_abnormal", "yes", 15], ["valve_opening_checked", "normal", 10]] },
   VALVE_MISCONFIGURED: { category: "FLOW_LOW", base: 15, rules: [["valve_opening_checked", "abnormal_or_partially_closed", 45], ["flow_decline_pattern", "sudden", 20]] },
   SYSTEM_RESISTANCE_CHANGE: { category: "FLOW_LOW", base: 15, rules: [["parallel_pump_status", "other_pump_abnormal", 25], ["flow_decline_pattern", "gradual", 15], ["operating_point_changed", "yes", 20]] },
@@ -269,6 +316,14 @@ const ACTION_PLAN_DB = {
     immediate: [{ ko: "커플링 가드 개방 후 정렬 상태 육안 확인", en: "Open the coupling guard and visually check alignment" }, { ko: "최근 정비/재조립 이력 확인", en: "Check recent maintenance/reassembly history" }],
     maintenance: [{ ko: "레이저 얼라인먼트 장비로 축정렬 정밀 측정", en: "Precisely measure shaft alignment with laser alignment equipment" }, { ko: "베이스플레이트 볼트 조임 상태 점검", en: "Check baseplate bolt tightness" }],
     escalation: [{ ko: "정렬 불량이 심할 경우 전문가와 함께 축 손상 여부 점검", en: "If misalignment is severe, check for shaft damage together with a specialist" }] },
+  IMPELLER_UNBALANCE: { severity: "MEDIUM",
+    immediate: [{ ko: "진동이 회전속도(1X)에 동기된 반경방향 진동인지 확인", en: "Check whether the vibration is radial and synchronous with running speed (1X)" }, { ko: "임펠러 이물질 부착·막힘 여부 확인 (점검구/분해 가능 시)", en: "Check the impeller for deposits or clogging (via inspection port or teardown)" }],
+    maintenance: [{ ko: "임펠러 침식·마모·결손 점검 및 동밸런싱(밸런스 수정) 실시", en: "Inspect the impeller for erosion, wear or missing material and dynamically balance it" }, { ko: "수리 후 재조립 시 키·슬리브 조립 상태 확인", en: "After repair, verify key and sleeve assembly" }],
+    escalation: [{ ko: "진동이 계속 증가하면 정지 후 임펠러와 축 상태를 점검", en: "If vibration keeps rising, stop and inspect the impeller and shaft" }] },
+  WEAK_FOUNDATION: { severity: "MEDIUM",
+    immediate: [{ ko: "앵커볼트와 베이스플레이트 고정 볼트 풀림 여부 확인", en: "Check anchor bolts and baseplate bolts for looseness" }, { ko: "배관 지지대·행거 상태 및 배관이 펌프를 당기는지(배관 응력) 확인", en: "Check pipe supports/hangers and whether the piping is straining the pump" }],
+    maintenance: [{ ko: "그라우트 균열·들뜸 점검 후 재시공, 소프트풋(발 뜸) 측정 및 쐐기(심) 보정", en: "Inspect grout for cracks or voids and redo it; measure and correct soft foot with shims" }, { ko: "기초 강성 보강 후 정렬 상태 재측정", en: "After stiffening the foundation, recheck alignment" }],
+    escalation: [{ ko: "기초 균열이 크거나 진동이 심하면 토목/구조 전문가에게 검토 요청", en: "If the foundation is badly cracked or vibration is severe, ask a civil/structural specialist to review" }] },
   AIR_ENTRAINMENT: { severity: "LOW",
     immediate: [{ ko: "흡입조/저수조 수위가 최소 침수깊이 이상인지 확인", en: "Check that the suction tank/reservoir level is above the minimum submergence depth" }, { ko: "흡입배관 플랜지/씰 부위 공기 유입 흔적 확인", en: "Check suction piping flanges/seals for signs of air ingress" }],
     maintenance: [{ ko: "흡입배관 경로 및 와류방지장치 설치 여부 검토", en: "Review the suction piping route and whether a vortex breaker is installed" }],
@@ -372,7 +427,8 @@ const SIGNAL_LABEL = {
 };
 // 시뮬레이션(오프라인) 분류용 키워드 — 마찬가지로 한/영 둘 다 매칭한다.
 const KEYWORD_HINTS = {
-  NOISE_VIBRATION: { ko: ["소리", "소음", "진동", "덜컹", "떨림"], en: ["sound", "noise", "vibration", "rattl", "shake"] },
+  NOISE: { ko: ["소리", "소음", "덜컹"], en: ["sound", "noise", "rattl"] },
+  VIBRATION: { ko: ["진동", "떨림", "흔들"], en: ["vibration", "shake", "shaking"] },
   FLOW_LOW: { ko: ["유량", "수량", "적게", "줄어", "안나와", "약해"], en: ["flow", "low flow", "reduced", "not coming out", "weak"] },
   PRESSURE_ABNORMAL: { ko: ["압력", "토출압", "맥동"], en: ["pressure", "discharge pressure", "pulsat"] },
   LEAKAGE: { ko: ["누설", "샌다", "새고", "새요", "물이 나와"], en: ["leak", "leaking", "dripping", "water coming"] },
