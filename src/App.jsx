@@ -55,6 +55,8 @@ const CAUSE_LABEL = {
   CAVITATION: { ko: "캐비테이션", en: "Cavitation" },
   BEARING_WEAR: { ko: "베어링 마모", en: "Bearing wear" },
   MISALIGNMENT: { ko: "축 정렬 불량", en: "Shaft misalignment" },
+  PART_RUBBING: { ko: "부품 간 접촉·마찰 (임펠러·웨어링 등)", en: "Part rubbing / contact (impeller, wear rings, etc.)" },
+  FLUID_PULSATION: { ko: "유체 맥동·배관 공진", en: "Fluid pulsation / piping resonance" },
   IMPELLER_UNBALANCE: { ko: "임펠러 언밸런스", en: "Impeller unbalance" },
   WEAK_FOUNDATION: { ko: "기초·베이스 불량", en: "Weak or defective foundation" },
   AIR_ENTRAINMENT: { ko: "공기 유입", en: "Air entrainment" },
@@ -78,7 +80,8 @@ const CHECKLISTS = {
   NOISE: [
     { key: "noise_type", text: { ko: "소음의 종류는 어떤가요?", en: "What type of noise is it?" }, options: [
       ["gravel_sound", { ko: "자갈 굴러가는 소리", en: "Gravel-rolling sound" }],
-      ["metallic_friction", { ko: "금속성 마찰음", en: "Metallic friction noise" }],
+      ["metallic_friction", { ko: "금속성 마찰음 (부품끼리 닿는 소리)", en: "Metallic friction noise (parts contacting)" }],
+      ["pulsating_beat", { ko: "맥동음 (쿵쿵/웅웅하며 커졌다 작아졌다 반복)", en: "Pulsation noise (throbbing, rising and falling repeatedly)" }],
       ["periodic_knocking", { ko: "주기적 덜컹거림", en: "Periodic knocking" }],
       ["low_humming", { ko: "웅웅거리는 저음", en: "Low humming" }],
     ] },
@@ -293,7 +296,9 @@ const CHECKLISTS = {
 };
 
 const MATRIX = {
-  CAVITATION: { category: "NOISE", base: 30, rules: [["noise_type", "gravel_sound", 40], ["noise_type", "metallic_friction", -10], ["noise_vibration_together", "both", 15], ["vibration_frequency", "broadband", 10], ["vibration_direction", "no_dominant", 5], ["flow_change", "yes", 12], ["pressure_change", "yes", 8], ["suction_gauge_abnormal", "yes", 25], ["operating_point_changed", "yes", 15], ["recent_maintenance", "yes_part_replaced", -5]] },
+  CAVITATION: { category: "NOISE", base: 30, rules: [["noise_type", "gravel_sound", 40], ["noise_type", "metallic_friction", -10], ["noise_vibration_together", "both", 15], ["noise_vibration_together", "vibration_only", -40], ["vibration_frequency", "broadband", 10], ["vibration_direction", "no_dominant", 5], ["flow_change", "yes", 12], ["pressure_change", "yes", 8], ["suction_gauge_abnormal", "yes", 25], ["operating_point_changed", "yes", 15], ["recent_maintenance", "yes_part_replaced", -5]] },
+  PART_RUBBING: { category: "NOISE", base: 15, rules: [["noise_type", "metallic_friction", 35], ["noise_type", "periodic_knocking", 15], ["recent_maintenance", "yes_part_replaced", 20], ["noise_vibration_together", "noise_only", 10], ["overheating_bearing", "no", 5]] },
+  FLUID_PULSATION: { category: "NOISE", base: 15, rules: [["noise_type", "pulsating_beat", 40], ["noise_location", "discharge_side", 15], ["operating_point_changed", "yes", 20], ["pressure_change", "yes", 15], ["flow_change", "yes", 10]] },
   BEARING_WEAR: { category: "VIBRATION", base: 25, rules: [["noise_type", "metallic_friction", 35], ["noise_type", "periodic_knocking", 30], ["vibration_location", "bearing_housing", 30], ["bearing_vib_direction", "all_directions", 25], ["bearing_vib_direction", "axial", 10], ["vibration_extent", "local", 10], ["vibration_frequency", "high_freq", 25], ["overheating_bearing", "yes", 25], ["lubrication_check", "overdue", 20], ["recent_maintenance", "no_long_term", 10]] },
   MISALIGNMENT: { category: "VIBRATION", base: 20, rules: [["vibration_location", "coupling", 30], ["vibration_direction", "axial", 30], ["vibration_frequency", "2x", 30], ["noise_vibration_together", "vibration_only", 10], ["recent_maintenance", "yes_part_replaced", 15]] },
   IMPELLER_UNBALANCE: { category: "VIBRATION", base: 15, rules: [["vibration_direction", "radial_horizontal", 25], ["vibration_direction", "radial_vertical", 20], ["bearing_vib_direction", "radial", 15], ["vibration_frequency", "1x", 35], ["noise_vibration_together", "vibration_only", 15], ["vibration_location", "motor", 5], ["recent_maintenance", "yes_part_replaced", 10]] },
@@ -328,6 +333,14 @@ const ACTION_PLAN_DB = {
     immediate: [{ ko: "커플링 가드 개방 후 정렬 상태 육안 확인", en: "Open the coupling guard and visually check alignment" }, { ko: "최근 정비/재조립 이력 확인", en: "Check recent maintenance/reassembly history" }],
     maintenance: [{ ko: "레이저 얼라인먼트 장비로 축정렬 정밀 측정", en: "Precisely measure shaft alignment with laser alignment equipment" }, { ko: "베이스플레이트 볼트 조임 상태 점검", en: "Check baseplate bolt tightness" }],
     escalation: [{ ko: "정렬 불량이 심할 경우 전문가와 함께 축 손상 여부 점검", en: "If misalignment is severe, check for shaft damage together with a specialist" }] },
+  PART_RUBBING: { severity: "MEDIUM",
+    immediate: [{ ko: "마찰음이 나는 위치(케이싱, 커플링 가드, 씰, 베어링부)를 청진봉 등으로 특정", en: "Locate the rubbing sound (casing, coupling guard, seal, bearing area) with a listening rod" }, { ko: "커플링 가드·보호 커버가 회전체에 닿지 않는지 확인", en: "Check that the coupling guard or covers do not touch rotating parts" }],
+    maintenance: [{ ko: "임펠러-웨어링 간극, 축 흔들림(런아웃), 조립 상태 점검", en: "Check impeller-to-wear-ring clearance, shaft runout and assembly" }, { ko: "최근 분해·재조립 부위의 체결·간극 재확인", en: "Recheck fastening and clearances where the pump was recently reassembled" }],
+    escalation: [{ ko: "금속 접촉음이 계속되면 즉시 정지 후 분해 점검", en: "If metal-to-metal contact noise continues, stop and open the pump for inspection" }] },
+  FLUID_PULSATION: { severity: "LOW",
+    immediate: [{ ko: "운전점이 BEP에서 크게 벗어나 저유량 운전 중인지 확인", en: "Check whether the pump is running far from BEP at low flow" }, { ko: "토출 밸브 개도를 조절해 맥동음이 변하는지 확인", en: "Adjust the discharge valve opening and see whether the pulsation noise changes" }],
+    maintenance: [{ ko: "배관 길이·지지 상태에 따른 공진 가능성 및 에어 포켓 점검", en: "Check for piping resonance from length/support and for air pockets" }, { ko: "필요 시 최소유량 바이패스 또는 맥동 완화 장치 검토", en: "Consider a minimum-flow bypass or pulsation dampening if needed" }],
+    escalation: [{ ko: "맥동과 함께 압력·전류 변동이 크면 정비 인력과 시스템 점검", en: "If pressure or current swings accompany the pulsation, check the system with maintenance staff" }] },
   IMPELLER_UNBALANCE: { severity: "MEDIUM",
     immediate: [{ ko: "진동이 회전속도(1X)에 동기된 반경방향 진동인지 확인", en: "Check whether the vibration is radial and synchronous with running speed (1X)" }, { ko: "임펠러 이물질 부착·막힘 여부 확인 (점검구/분해 가능 시)", en: "Check the impeller for deposits or clogging (via inspection port or teardown)" }],
     maintenance: [{ ko: "임펠러 침식·마모·결손 점검 및 동밸런싱(밸런스 수정) 실시", en: "Inspect the impeller for erosion, wear or missing material and dynamically balance it" }, { ko: "수리 후 재조립 시 키·슬리브 조립 상태 확인", en: "After repair, verify key and sleeve assembly" }],
