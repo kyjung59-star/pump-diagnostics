@@ -84,7 +84,10 @@ const CHECKLISTS = {
       ["discharge_side", { ko: "토출측", en: "Discharge side" }],
       ["motor_side", { ko: "모터측", en: "Motor side" }],
     ] },
-    { key: "flow_pressure_change", text: { ko: "유량이나 압력에도 변화가 있나요?", en: "Is there also a change in flow or pressure?" }, options: [
+    { key: "flow_change", text: { ko: "유량에 변화가 있나요? (감소하거나 들쭉날쭉한 경우)", en: "Is there a change in flow? (reduced or fluctuating)" }, options: [
+      ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
+    ] },
+    { key: "pressure_change", text: { ko: "토출 압력에 변화가 있나요? (저하되거나 맥동하는 경우)", en: "Is there a change in discharge pressure? (dropping or pulsating)" }, options: [
       ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
     ] },
     { key: "operating_point_changed", text: { ko: "최근 운전점(유량/양정)이 설계값 대비 변경되었나요?", en: "Has the operating point (flow/head) recently shifted from the design value?" }, options: [
@@ -233,10 +236,10 @@ const CHECKLISTS = {
 };
 
 const MATRIX = {
-  CAVITATION: { category: "NOISE_VIBRATION", base: 30, rules: [["noise_type", "gravel_sound", 40], ["noise_type", "metallic_friction", -10], ["flow_pressure_change", "yes", 20], ["suction_gauge_abnormal", "yes", 25], ["operating_point_changed", "yes", 15], ["recent_maintenance", "yes_part_replaced", -5]] },
+  CAVITATION: { category: "NOISE_VIBRATION", base: 30, rules: [["noise_type", "gravel_sound", 40], ["noise_type", "metallic_friction", -10], ["flow_change", "yes", 12], ["pressure_change", "yes", 8], ["suction_gauge_abnormal", "yes", 25], ["operating_point_changed", "yes", 15], ["recent_maintenance", "yes_part_replaced", -5]] },
   BEARING_WEAR: { category: "NOISE_VIBRATION", base: 25, rules: [["noise_type", "metallic_friction", 35], ["noise_type", "periodic_knocking", 30], ["vibration_location", "bearing_housing", 30], ["overheating_bearing", "yes", 25], ["lubrication_check", "overdue", 20], ["recent_maintenance", "no_long_term", 10]] },
   MISALIGNMENT: { category: "NOISE_VIBRATION", base: 20, rules: [["vibration_location", "coupling", 30], ["noise_type", "periodic_knocking", 20], ["recent_maintenance", "yes_part_replaced", 15]] },
-  AIR_ENTRAINMENT: { category: "NOISE_VIBRATION", base: 15, rules: [["noise_location", "suction_side", 20], ["suction_gauge_abnormal", "yes", 20], ["flow_pressure_change", "yes", 15], ["suction_level_dropped", "yes", 20]] },
+  AIR_ENTRAINMENT: { category: "NOISE_VIBRATION", base: 15, rules: [["noise_location", "suction_side", 20], ["suction_gauge_abnormal", "yes", 20], ["flow_change", "yes", 8], ["pressure_change", "yes", 7], ["suction_level_dropped", "yes", 20]] },
   IMPELLER_WEAR_OR_CLOG: { category: "FLOW_LOW", base: 20, rules: [["flow_decline_pattern", "gradual", 25], ["strainer_clogged", "yes", 30], ["suction_gauge_abnormal", "yes", 15], ["valve_opening_checked", "normal", 10]] },
   VALVE_MISCONFIGURED: { category: "FLOW_LOW", base: 15, rules: [["valve_opening_checked", "abnormal_or_partially_closed", 45], ["flow_decline_pattern", "sudden", 20]] },
   SYSTEM_RESISTANCE_CHANGE: { category: "FLOW_LOW", base: 15, rules: [["parallel_pump_status", "other_pump_abnormal", 25], ["flow_decline_pattern", "gradual", 15], ["operating_point_changed", "yes", 20]] },
