@@ -98,7 +98,7 @@ const CHECKLISTS = {
     { key: "flow_change", text: { ko: "유량에 변화가 있나요? (감소하거나 들쭉날쭉한 경우)", en: "Is there a change in flow? (reduced or fluctuating)" }, options: [
       ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
     ] },
-    { key: "pressure_change", text: { ko: "토출 압력에 변화가 있나요? (저하되거나 맥동하는 경우)", en: "Is there a change in discharge pressure? (dropping or pulsating)" }, options: [
+    { key: "pressure_change", text: { ko: "압력에 변화가 있나요? (흡입·토출 압력이 저하되거나 맥동하는 경우)", en: "Is there a change in pressure? (suction or discharge pressure dropping or pulsating)" }, options: [
       ["yes", { ko: "예", en: "Yes" }], ["no", { ko: "아니오", en: "No" }],
     ] },
     { key: "operating_point_changed", text: { ko: "최근 운전점(유량/양정)이 설계값 대비 변경되었나요?", en: "Has the operating point (flow/head) recently shifted from the design value?" }, options: [
@@ -297,8 +297,8 @@ const CHECKLISTS = {
 
 const MATRIX = {
   CAVITATION: { category: "NOISE", base: 30, rules: [["noise_type", "gravel_sound", 40], ["noise_type", "metallic_friction", -10], ["noise_vibration_together", "both", 15], ["noise_vibration_together", "vibration_only", -10], ["vibration_frequency", "broadband", 10], ["vibration_direction", "no_dominant", 5], ["flow_change", "yes", 12], ["pressure_change", "yes", 8], ["suction_gauge_abnormal", "yes", 25], ["operating_point_changed", "yes", 15], ["recent_maintenance", "yes_part_replaced", -5]],
-    // 진동이 수반되면서 유량 변화가 있으면 캐비테이션 가능성이 높다 (조합 가점)
-    combos: [[{ flow_change: "yes", noise_vibration_together: ["both", "vibration_only"] }, 35], [{ flow_change: "yes", suction_gauge_abnormal: "yes", noise_vibration_together: ["both", "vibration_only"] }, 25]] },
+    // 캐비테이션의 전형: 유량 변화 + 압력(흡입압력 포함) 변화가 있고, 소음과 진동이 함께 나타남 (조합 가점)
+    combos: [[{ flow_change: "yes", noise_vibration_together: "both", $any: [{ pressure_change: "yes" }, { suction_gauge_abnormal: "yes" }] }, 50]] },
   PART_RUBBING: { category: "NOISE", base: 15, rules: [["noise_type", "metallic_friction", 35], ["noise_type", "periodic_knocking", 15], ["recent_maintenance", "yes_part_replaced", 20], ["noise_vibration_together", "noise_only", 10], ["overheating_bearing", "no", 5]] },
   FLUID_PULSATION: { category: "NOISE", base: 15, rules: [["noise_type", "pulsating_beat", 40], ["noise_location", "discharge_side", 15], ["operating_point_changed", "yes", 20], ["pressure_change", "yes", 15], ["flow_change", "yes", 10]] },
   BEARING_WEAR: { category: "VIBRATION", base: 25, rules: [["noise_type", "metallic_friction", 35], ["noise_type", "periodic_knocking", 30], ["vibration_location", "bearing_housing", 30], ["bearing_vib_direction", "all_directions", 25], ["bearing_vib_direction", "axial", 10], ["vibration_extent", "local", 10], ["vibration_frequency", "high_freq", 25], ["overheating_bearing", "yes", 25], ["lubrication_check", "overdue", 20], ["recent_maintenance", "no_long_term", 10]] },
@@ -493,10 +493,12 @@ function evaluateCauseProbability(answers) {
     let maxAchievable = spec.base + Object.values(maxByKey).reduce((sum, w) => sum + w, 0);
     // 여러 답변이 동시에 맞을 때만 붙는 조합 가점
     for (const [conds, weight] of spec.combos || []) {
-      const hit = Object.entries(conds).every(([k, v]) => (Array.isArray(v) ? v.includes(answers[k]) : answers[k] === v));
+      const match = (k, v) => (Array.isArray(v) ? v.includes(answers[k]) : answers[k] === v);
+      const { $any, ...all } = conds;
+      const hit = Object.entries(all).every(([k, v]) => match(k, v)) && (!$any || $any.some((o) => Object.entries(o).every(([k, v]) => match(k, v))));
       if (hit) {
         score += weight;
-        evidence.push(`${Object.keys(conds).join("+")} (${weight > 0 ? "+" : ""}${weight})`);
+        evidence.push(`combo:${Object.keys(all).join("+")} (${weight > 0 ? "+" : ""}${weight})`);
       }
     }
 
