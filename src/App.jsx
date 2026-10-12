@@ -522,11 +522,11 @@ const CRITICAL_TEXT_SIGNALS = {
 // 얼마나 뜨거운지 먼저 되물어 확인한 뒤 심각도를 정한다 (아래 heat_clarify 흐름 참고).
 const HARD_SIGNAL_CODES = new Set(["smoke_or_burning_smell", "electrical_spark", "severe_visible_vibration", "sudden_loud_noise"]);
 
-// 베어링 하우징 온도 기준 (사용자 지정 정책)
-// - 75~80°C 이상: 점검 대상 (경계 구간이므로 보수적으로 낮은 쪽 75°C를 기준점으로 사용)
-// - 85~90°C 이상: 무조건 정지 후 오버홀(분해 정비) 검토 (보수적으로 낮은 쪽 85°C를 기준점으로 사용)
-const BEARING_TEMP_INSPECT_C = 75;
-const BEARING_TEMP_STOP_C = 85;
+// 베어링 하우징 온도 기준 (현장 진단 종합 보고서 기준)
+// - 정상 범위 40~70°C. 70°C 이상: 점검 대상 (일일 감시, 윤활·정렬·오염 점검)
+// - 80°C 이상: 즉시 정지 판단 (80°C를 넘어 계속 상승하면 정지 후 분해 점검 검토)
+const BEARING_TEMP_INSPECT_C = 70;
+const BEARING_TEMP_STOP_C = 80;
 
 // 실측 온도를 모를 때 감각으로 답할 수 있는 대체 선택지 (위 온도 기준과 매칭)
 const HEAT_CLARIFY_OPTIONS = [
