@@ -3,7 +3,9 @@
  * --------------------------------------------------------
  * PWA 설치 가능성(installability) 요건 중 하나가 "서비스 워커 등록"이라
  * 이 파일이 필요하다. 전략은 단순하게:
- *   - 정적 자산(JS/CSS/아이콘/manifest)은 캐시 우선(cache-first)
+ *   - 화면 진입(HTML)과 manifest는 네트워크 우선(network-first): 새 버전을 배포하면 바로 받아가고,
+ *     오프라인일 때만 캐시를 쓴다. (HTML을 캐시 우선으로 두면 재방문 사용자가 옛 앱 화면을 계속 보게 된다)
+ *   - 그 외 정적 자산(해시가 붙은 JS/CSS, 아이콘)은 캐시 우선(cache-first)
  *   - API 호출(/api/*)은 항상 네트워크로 (오프라인 캐싱 대상 아님 —
  *     AI 진단은 서버 연결이 필수이므로 캐시하면 안 됨)
  *   - 캐시된 적 없는 요청은 네트워크로 가되, 성공하면 캐시에 저장
@@ -13,7 +15,7 @@
  * 명시해두는 게 좋다(완전 오프라인 앱이 아님).
  */
 
-const CACHE_NAME = "pump-diagnostics-v1";
+const CACHE_NAME = "pump-diagnostics-v2"; // 캐시 전략/아이콘을 바꿀 때마다 올려서 옛 캐시를 비운다
 const APP_SHELL = ["/", "/index.html", "/manifest.json"];
 
 self.addEventListener("install", (event) => {
@@ -42,6 +44,23 @@ self.addEventListener("fetch", (event) => {
 
   // GET 요청이 아니면 그대로 통과
   if (event.request.method !== "GET") {
+    return;
+  }
+
+  // HTML 진입과 manifest는 네트워크 우선 — 성공하면 캐시를 최신으로 갱신, 실패(오프라인)하면 캐시 사용
+  const isShell = event.request.mode === "navigate" || ["/", "/index.html", "/manifest.json"].includes(url.pathname);
+  if (isShell) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match("/index.html")))
+    );
     return;
   }
 

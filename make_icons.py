@@ -1,49 +1,29 @@
 """
-PWA 앱 아이콘 생성 — 헤더의 물방울 로고 컨셉(앰버 원형 배경 + 흰 물방울)을
-여러 사이즈로 렌더링한다. 웹 UI의 테마 색상(T.bg, T.amber)과 맞춘다.
+PWA/앱 아이콘 생성 — design/ 폴더의 마스터 이미지(1024px)를 여러 사이즈로 줄여 public/ 에 저장한다.
+디자인(물방울 + 압력 게이지 + 진단 맥박선)은 design/icon-*.svg 가 원본이다.
+  - icon-any-1024.png       : 모서리가 둥근 사각형(투명 모서리) — 일반 용도 아이콘
+  - icon-maskable-1024.png  : 꽉 찬 배경 + 중앙 80% 안전 영역 — 안드로이드 마스커블/런처용
+  - icon-store-1024.png     : 꽉 찬 정사각형 — Play 스토어 아이콘(512px로 줄여 업로드), 애플 터치 아이콘
+사용법: python3 make_icons.py   (Pillow 필요)
 """
-from PIL import Image, ImageDraw
+from pathlib import Path
+from PIL import Image
 
-BG = (20, 23, 26, 255)       # T.bg #14171A
-AMBER = (242, 169, 59, 255)  # T.amber #F2A93B
-WHITE = (233, 237, 240, 255)  # T.text #E9EDF0
-
+ROOT = Path(__file__).parent
+DESIGN = ROOT / "design"
+OUT = ROOT / "public" / "icons"
 SIZES = [72, 96, 128, 144, 152, 180, 192, 384, 512]
 
 
-def draw_droplet(draw, cx, cy, scale):
-    """단순화된 물방울 두 개(lucide Droplets 컨셉) 아이콘을 그린다."""
-    # 큰 물방울
-    r = 0.34 * scale
-    top_y = cy - 0.62 * scale
-    draw.ellipse([cx - r, cy - r * 0.15, cx + r, cy + r * 1.85], fill=WHITE)
-    draw.polygon([
-        (cx, top_y),
-        (cx - r * 0.95, cy + r * 0.55),
-        (cx + r * 0.95, cy + r * 0.55),
-    ], fill=WHITE)
-
-
-def make_icon(size: int, maskable: bool = False) -> Image.Image:
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-
-    pad = int(size * (0.12 if maskable else 0.06))
-    box = [pad, pad, size - pad, size - pad]
-    radius = int(size * 0.22)
-
-    draw.rounded_rectangle(box, radius=radius, fill=BG, outline=AMBER, width=max(2, size // 40))
-    draw_droplet(draw, size / 2, size / 2 + size * 0.03, size * 0.5)
-
-    return img
+def resized(src: str, size: int) -> Image.Image:
+    return Image.open(DESIGN / src).convert("RGBA").resize((size, size), Image.LANCZOS)
 
 
 if __name__ == "__main__":
-    out_dir = "/home/claude/pump-site/public/icons"
+    OUT.mkdir(parents=True, exist_ok=True)
     for s in SIZES:
-        make_icon(s).save(f"{out_dir}/icon-{s}.png")
-    # 마스커블 아이콘(안드로이드 어댑티브 아이콘용, 여백 더 확보)
-    make_icon(512, maskable=True).save(f"{out_dir}/icon-maskable-512.png")
-    # 애플 터치 아이콘
-    make_icon(180).save("/home/claude/pump-site/public/apple-touch-icon.png")
+        resized("icon-any-1024.png", s).save(OUT / f"icon-{s}.png", optimize=True)
+    resized("icon-maskable-1024.png", 512).convert("RGB").save(OUT / "icon-maskable-512.png", optimize=True)
+    resized("icon-store-1024.png", 180).convert("RGB").save(ROOT / "public" / "apple-touch-icon.png", optimize=True)
+    resized("icon-store-1024.png", 512).convert("RGB").save(DESIGN / "play-store-icon-512.png", optimize=True)
     print("아이콘 생성 완료:", SIZES)
